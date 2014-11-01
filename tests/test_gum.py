@@ -5,7 +5,7 @@ from unittest import TestCase
 
 import os
 import samples
-from gumpy import default_framework, BundleInstallError
+from gumpy import default_framework
 
 
 import logging

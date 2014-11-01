@@ -5,7 +5,11 @@ import sys
 import os
 from cmd import Cmd
 from gumpy import BundleInstallError
-import configparser
+
+try:
+    import ConfigParser as configparser
+except ImportError:
+    import configparser
 
 class GumCmd(Cmd):
     def __init__(self, framework, plugins_path):
