@@ -127,8 +127,8 @@ class ServiceReference(object):
             instance.__context__ = self.__context__
             instance.__framework__ = self.__framework__
             instance.__reference__ = self
-            if 'initialize' in dir(instance):
-                instance.initialize()
+            if 'on_start' in dir(instance):
+                instance.on_start()
             self._instance = instance
             self._evt.set()
             members = (getattr(instance, an) for an in dir(instance))
@@ -141,6 +141,8 @@ class ServiceReference(object):
             self.__framework__.unregister_consumers(self._consumers)
             self.__framework__.unregister_producer(self)
             self._consumers = None
+            if 'on_stop' in dir(self._instance):
+                self._instance.on_stop()
             del self._instance
             self._instance = None
             self._evt.clear()
@@ -168,12 +170,8 @@ class BundleContext(ExecutorHelper):
         self._deactivator = lambda: None
         self._module = None
 
-        try:
-            module_name = position.split('.')[-1]
-            self._module = __import__(position, fromlist=(module_name, ))
-            self._path = self._module.__file__
-        except ImportError:
-            abspath = os.path.abspath(position)
+        abspath = os.path.abspath(position)
+        if os.path.exists(abspath):
             fn, ext = os.path.splitext(os.path.basename(abspath))
             if os.path.isfile(abspath):
                 if ext == '.py':
@@ -181,29 +179,30 @@ class BundleContext(ExecutorHelper):
                 elif ext == '.zip':
                     self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
-
-        if self._module:
-            if hasattr(self._module, '__symbol__'):
-                self._name = self._module.__symbol__
-            else:
-                self._name = self._module.__name__
-
-            for attr_name in dir(self._module):
-                attr = getattr(self._module, attr_name)
-                if isinstance(attr, _ManagerHelper):
-                    manager = attr.to_managed()
-                    if isinstance(manager, activator):
-                        self._activator = manager
-                    elif isinstance(manager, deactivator):
-                        self._deactivator = manager
-                    elif isinstance(manager, ServiceReference):
-                        manager.__context__ = self
-                        manager.__framework__ = self.__framework__
-                        self._service_references[manager.name] = manager
-
-            self._state = self.ST_RESOLVED
         else:
-            raise BundleInstallError('bundle {0} not found'.format(abspath))
+            module_name = position.split('.')[-1]
+            self._module = __import__(position, fromlist=(module_name, ))
+            self._path = self._module.__file__
+
+        if hasattr(self._module, '__symbol__'):
+            self._name = self._module.__symbol__
+        else:
+            self._name = self._module.__name__
+
+        for attr_name in dir(self._module):
+            attr = getattr(self._module, attr_name)
+            if isinstance(attr, _ManagerHelper):
+                manager = attr.to_managed()
+                if isinstance(manager, activator):
+                    self._activator = manager
+                elif isinstance(manager, deactivator):
+                    self._deactivator = manager
+                elif isinstance(manager, ServiceReference):
+                    manager.__context__ = self
+                    manager.__framework__ = self.__framework__
+                    self._service_references[manager.name] = manager
+
+        self._state = self.ST_RESOLVED
 
     @property
     def path(self):
@@ -317,14 +316,9 @@ class Framework(ExecutorHelper):
 
     @async
     def install_bundle(self, position):
-        try:
-            bdl = BundleContext(self, position)
-            self._bundles[bdl.name] = bdl
-            return bdl
-        except BundleInstallError:
-            raise
-        except BaseException:
-            raise
+        bdl = BundleContext(self, position)
+        self._bundles[bdl.name] = bdl
+        return bdl
 
     def install_bundles(self, tp_list):
         return [self.install_bundle(tp) for tp in tp_list]

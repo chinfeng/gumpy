@@ -4,6 +4,8 @@ __author__ = 'chinfeng'
 import sys
 import os
 from cmd import Cmd
+from gumpy import BundleInstallError
+import configparser
 
 class GumCmd(Cmd):
     def __init__(self, framework, plugins_path):
@@ -12,10 +14,33 @@ class GumCmd(Cmd):
         self._plugins_path = os.path.abspath(plugins_path)
         sys.path.append(self._plugins_path)
 
+        self._config = configparser.ConfigParser()
+        config_fn = os.path.join(self._plugins_path, 'config.ini')
+        if os.path.exists(config_fn):
+            self._config.read(config_fn)
+
+        for section in self._config.sections():
+            try:
+                _f = self._framework.install_bundle(section)
+                if self._config.get(section, 'start'):
+                    _f.result().start().result()
+            except configparser.NoOptionError:
+                pass
+            except BundleInstallError:
+                self._config.remove_section(section)
+
+
         self.intro = 'Gumpy runtime console'
         self.prompt = '>>> '
 
+    def _save_config(self):
+        with open(os.path.join(self._plugins_path, 'config.ini'), 'w') as fd:
+            self._config.write(fd)
+
     def do_EOF(self, line):
+        return True
+
+    def do_exit(self, line):
         return True
 
     def do_repo(self, line):
@@ -45,7 +70,7 @@ class GumCmd(Cmd):
             else:
                 st = ''
 
-            print('  {:<15}{:<15}{:<15}'.format(name, tp, st))
+            print('  {:<24}{:<24}{:<24}'.format(name, tp, st))
 
     def do_install(self, line):
         if line[-1] == '&':
@@ -63,12 +88,16 @@ class GumCmd(Cmd):
             f = self._framework.install_bundle(uri)
             if not async:
                 f.result()
+
+            if uri not in self._config.sections():
+                self._config.add_section(uri)
+                self._save_config()
         except BaseException as e:
             print(e)
 
     def do_list(self, line):
         for bdl in self._framework.bundles.values():
-            print('  {:<15}{:<15}'.format(
+            print('  {:<24}{:<24}'.format(
                 bdl.name, '[%s]' % bdl.state[1]))
 
     def do_start(self, line):
@@ -85,6 +114,8 @@ class GumCmd(Cmd):
                 f = bdl.start()
                 if not async:
                     f.result()
+                self._config.set(bn, 'start', 1)
+                self._save_config()
             except BaseException as err:
                 print(err)
         else:
@@ -104,6 +135,8 @@ class GumCmd(Cmd):
                 f = bdl.stop()
                 if not async:
                     f.result()
+                self._config.set(bn, 'start', 0)
+                self._save_config()
             except BaseException as err:
                 print(err)
         else:
@@ -112,4 +145,3 @@ class GumCmd(Cmd):
     def do_call(self, line):
         service_uri, call_caluse = line.split('.', 1)
         print(eval('self._framework.get_service(\'{0}\').{1}'.format(service_uri, call_caluse)))
-

@@ -26,34 +26,26 @@ class GumTestCase(TestCase):
 
         bdl = fmk.get_bundle('mod_bdl')
         self.assertEqual(bdl.state, bdl.ST_RESOLVED)
-        _f = bdl.start()
-        _f.wait()
+        bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
 
         bdl = fmk.get_bundle('pkg_bdl')
         self.assertEqual(bdl.state, bdl.ST_RESOLVED)
-        _f = bdl.start()
-        _f.wait()
+        bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
 
         bdl = fmk.get_bundle('file_bdl')
         self.assertEqual(bdl.state, bdl.ST_RESOLVED)
-        _f = bdl.start()
-        _f.wait()
+        bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
 
         bdl = fmk.get_bundle('zip_bdl')
         self.assertEqual(bdl.state, bdl.ST_RESOLVED)
-        _f = bdl.start()
-        _f.wait()
+        bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
 
-        try:
-            fmk.install_bundle('something_not_exists').result()
-            self.assertIs(False, True)
-        except BundleInstallError:
-            self.assertIs(True, True)
+        self.assertRaises(fmk.install_bundle('something_not_exists').result)
 
         # Require test
         sa = fmk.get_service('mod_bdl:SampleServiceA')
@@ -75,8 +67,7 @@ class GumTestCase(TestCase):
         self.assertIn(msb, msa.twos)
         self.assertIn(fsb, msa.twos)
 
-        _f = fmk.get_bundle('file_bdl').stop()
-        _f.wait()
+        fmk.get_bundle('file_bdl').stop().result()
         self.assertNotIn(fsa, msa.ones)
         self.assertNotIn(fsb, msa.twos)
 

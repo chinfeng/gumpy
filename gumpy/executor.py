@@ -198,12 +198,12 @@ def async(func):
             return func
     return _async_callable
 
-def mutex(func):
-    def _mutex_callable(instance, *args, **kwargs):
+def exclusive(func):
+    def _exclusive_callable(instance, *args, **kwargs):
         if isinstance(instance, ExecutorHelper):
             method = types.MethodType(func, instance)
             return instance.__executor__.exclusive_submit(method, *args, **kwargs)
         else:
             return func
-    return _mutex_callable
+    return _exclusive_callable
 

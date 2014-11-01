@@ -8,7 +8,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path',
-                        dest='plugins_path', default='.',
+                        dest='plugins_path', default='plugins',
                         help='plugins directory')
     args = parser.parse_args()
 

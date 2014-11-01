@@ -18,7 +18,7 @@ class SampleServicePre(object):
 
 @service
 class SampleServiceA(object):
-    def initialize(self):
+    def on_start(self):
         self.ones = set()
         self.twos = set()
 
