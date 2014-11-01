@@ -4,7 +4,6 @@ __author__ = 'chinfeng'
 import sys
 import os
 from cmd import Cmd
-from gumpy import BundleInstallError
 
 try:
     import ConfigParser as configparser
@@ -30,7 +29,8 @@ class GumCmd(Cmd):
                     _f.result().start().result()
             except configparser.NoOptionError:
                 pass
-            except BundleInstallError:
+            except BaseException as e:
+                print('  bundle {0} init error:'.format(section), e)
                 self._config.remove_section(section)
 
 

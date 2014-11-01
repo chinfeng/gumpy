@@ -6,18 +6,25 @@ from wsgiref.util import shift_path_info
 from wsgiref import validate
 from gumpy.deco import *
 
+import logging
+logger = logging.getLogger(__name__)
+
 @service
 class WSGIServer(threading.Thread):
     def __init__(self):
         super(self.__class__, self).__init__()
         self.daemon = True
         self._apps = {}
-
-        from wsgiref.simple_server import make_server
-        self._httpd = make_server('', 80, self._wsgi_app)
+        self._httpd = None
 
     def run(self):
-        self._httpd.serve_forever()
+        try:
+            from wsgiref.simple_server import make_server
+            self._httpd = make_server('', 80, self._wsgi_app)
+            self._httpd.serve_forever()
+        except BaseException as e:
+            logger.error('simple_wsgi_serv httpd fail to start')
+            logger.exception(e)
 
     def on_start(self):
         self.start()
