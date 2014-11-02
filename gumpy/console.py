@@ -118,7 +118,7 @@ class GumCmd(Cmd):
                 f = bdl.start()
                 if not async:
                     f.result()
-                self._config.set(bn, 'start', 1)
+                self._config.set(bdl.uri, 'start', 1)
                 self._save_config()
             except BaseException as err:
                 print(err)
@@ -139,7 +139,7 @@ class GumCmd(Cmd):
                 f = bdl.stop()
                 if not async:
                     f.result()
-                self._config.set(bn, 'start', 0)
+                self._config.set(bdl.uri, 'start', 0)
                 self._save_config()
             except BaseException as err:
                 print(err)

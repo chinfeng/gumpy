@@ -197,16 +197,17 @@ class BundleContext(ExecutorHelper):
     ST_STOPING = _immutable_prop((4, 'STOPING'))
     ST_UNINSTALLED = _immutable_prop((5, 'UNINSTALLED'))
 
-    def __init__(self, framework, position):
+    def __init__(self, framework, uri):
         ExecutorHelper.__init__(self, framework.__executor__)
         self._framework = framework
+        self._uri = uri
         self._state = self.ST_INSTALLED
         self._service_references = {}
         self._activator = lambda: None
         self._deactivator = lambda: None
         self._module = None
 
-        abspath = os.path.abspath(position)
+        abspath = os.path.abspath(uri)
         if os.path.exists(abspath):
             fn, ext = os.path.splitext(os.path.basename(abspath))
             if os.path.isfile(abspath):
@@ -216,8 +217,8 @@ class BundleContext(ExecutorHelper):
                     self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
-            module_name = position.split('.')[-1]
-            self._module = __import__(position, fromlist=(module_name, ))
+            module_name = uri.split('.')[-1]
+            self._module = __import__(uri, fromlist=(module_name, ))
             self._path = self._module.__file__
 
         if hasattr(self._module, '__symbol__'):
@@ -243,6 +244,10 @@ class BundleContext(ExecutorHelper):
     @property
     def path(self):
         return self._path
+
+    @property
+    def uri(self):
+        return self._uri
 
     @property
     def name(self):
