@@ -6,6 +6,7 @@ import imp
 import zipimport
 import itertools
 import threading
+import collections
 from .executor import ExecutorHelper, async
 
 try:
@@ -17,11 +18,46 @@ import logging
 logger = logging.getLogger(__name__)
 
 _immutable_prop = lambda v: property(lambda self, value=v: value)
-service_uri = lambda uri: dict(
-    izip_longest(
-        ('service_name', 'bundle_name', 'location', 'scheme'),
-        reversed(uri.split(':'))
-    ))
+_uri_class = collections.namedtuple('GumURI', ('host', 'port', 'bundle', 'service'))
+_BUNDLE_LEVEL = 0
+_SERVICE_LEVEL = 1
+
+def service_uri(uri, pwd_level=_SERVICE_LEVEL):
+    if uri.startswith('gum://'):
+        # absolute uri like:
+        #   gum://host:port/bundle:service
+        location, entity = uri[6:].split('/')
+        loc_list = location.split(':')
+        host = loc_list.pop(0)
+        port = int(loc_list.pop(0)) if loc_list else 3040
+        entity_list = entity.split(':')
+        bundle = entity_list.pop(0)
+        service = entity_list.pop(0) if entity_list else None
+    else:
+        # relative uri like:
+        #   service
+        #   bundle:service
+        #   host/bundle:service
+        u_list = uri.split('/')
+        entity = u_list.pop()
+        location = u_list.pop() if u_list else None
+        if location:
+            loc_list = location.split(':')
+            host = loc_list.pop(0)
+            port = int(loc_list.pop(0)) if loc_list else 3040
+        else:
+            host = port = None
+        entity_list = entity.split(':')
+        if len(entity_list) == 1:
+            if pwd_level == _BUNDLE_LEVEL:
+                bundle = entity_list[0]
+                service = None
+            else:
+                bundle = None
+                service = entity_list[0]
+        else:
+            bundle, service = entity_list
+    return _uri_class(host, port, bundle, service)
 
 class BundleInstallError(RuntimeError):
     pass
@@ -246,13 +282,10 @@ class BundleContext(ExecutorHelper):
 
     def get_service_reference(self, uri):
         u = service_uri(uri)
-        bn = u.get('bundle_name')
-        sn = u.get('service_name')
-
-        if bn:
-            return self._framework.get_service_reference(uri)
+        if u.bundle:
+            return self._framework.bundles[u.bundle].get_service_reference_by_name(u.service)
         else:
-            return self.get_service_reference_by_name(sn)
+            return self.get_service_reference_by_name(u.service)
 
     def get_service_reference_by_name(self, name):
         if name in self._service_references:
@@ -311,8 +344,8 @@ class Framework(ExecutorHelper):
     def bundles(self):
         return self._bundles
 
-    def get_bundle(self, uri):
-        return self._bundles.get(uri, None)
+    def get_bundle(self, uri, default=None):
+        return self._bundles.get(uri, default)
 
     @async
     def install_bundle(self, position):
@@ -324,18 +357,22 @@ class Framework(ExecutorHelper):
         return [self.install_bundle(tp) for tp in tp_list]
 
     def get_service_reference(self, uri):
-        u = service_uri(uri)
-        bn = u.get('bundle_name')
-        sn = u.get('service_name')
-
-        if bn in self._bundles:
-            return self._bundles[bn].get_service_reference_by_name(sn)
+        u = service_uri(uri, _BUNDLE_LEVEL)
+        if u.bundle in self._bundles:
+            return self._bundles[u.bundle].get_service_reference_by_name(u.service)
         else:
             return None
 
     def get_service(self, name, timeout=None):
         service = self.get_service_reference(name)
         return service.get_service(timeout) if service else None
+
+    def get(self, uri):
+        u = service_uri(uri, _BUNDLE_LEVEL)
+        if u.service:
+            return self._bundles[u.bundle].get_service_reference_by_name(u.service)
+        else:
+            return self._bundles[u.bundle]
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

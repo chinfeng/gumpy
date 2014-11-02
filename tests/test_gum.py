@@ -40,7 +40,7 @@ class GumTestCase(TestCase):
         bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
 
-        bdl = fmk.get_bundle('zip_bdl')
+        bdl = fmk.get('zip_bdl')
         self.assertEqual(bdl.state, bdl.ST_RESOLVED)
         bdl.start().result()
         self.assertEqual(bdl.state, bdl.ST_ACTIVE)
@@ -49,7 +49,7 @@ class GumTestCase(TestCase):
 
         # Require test
         sa = fmk.get_service('mod_bdl:SampleServiceA')
-        sb = fmk.get_service('mod_bdl:SampleServiceB')
+        sb = fmk.get('mod_bdl:SampleServiceB').get_service()
         self.assertEqual(sa, sb.foo1())
         self.assertEqual(sa, sb.foo2())
 
