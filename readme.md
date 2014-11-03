@@ -4,9 +4,9 @@
 
 ## 启动 ##
 
-    $ python -m gumpy -p plugins_dir
+    $ python -m gumpy -p [plugins_dir]
     
-上述代码启动 gumpy 模块，以 samples 目录为组件目录
+上述代码启动 gumpy 模块，以 [plugins_dir] 目录为组件目录（默认为当前目录下的 plugins）
 
 ## 指令 ##
 
@@ -43,3 +43,14 @@
     >>> call file_bdl:SampleServiceA.foo()
           - 调用 file_bdl 组件中的 SampleServiceA 服务中的 foo 办法
     <mod_bdl.SampleServiceA object at 0x7f1210ddec90>
+    
+## Web console ##
+
+内置简单的网页管理组件，plugins/console_server 组件，请输入下面指令启动：
+
+    $ python -m gumpy
+    Gumpy runtime console
+    >>> install console_server
+    >>> start console_server
+    
+启动后访问 http://localhost:3040 进入 WEB 控制台
