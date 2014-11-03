@@ -55,4 +55,4 @@ class WSGIServer(threading.Thread):
                 environ['SCRIPT_NAME'] = ''
                 return self._apps[app_route](environ, start_response)
         start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
-        return ['no application deployed']
+        return ['no application deployed'.encode('utf-8')]

@@ -217,8 +217,7 @@ class BundleContext(ExecutorHelper):
                 self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
-            module_name = uri.split('.')[-1]
-            self._module = __import__(uri, fromlist=(module_name, ))
+            self._module = __import__(uri)
             self._path = os.path.dirname(self._module.__file__)
 
         if hasattr(self._module, '__symbol__'):
@@ -387,7 +386,7 @@ class Framework(ExecutorHelper):
         for section in state_config.sections():
             try:
                 uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
-                if section not in self.bundles:
+                if section not in uri_dict:
                     bdl = self.install_bundle(section).result()
                 else:
                     bdl = uri_dict[section]
