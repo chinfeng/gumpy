@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="myApp" class="yui3-js-enabled">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Gumpy web console</title>
+
+
+    <link rel="stylesheet" href="http://yui.yahooapis.com/pure/0.5.0/pure-min.css">
+
+    <!--[if lte IE 8]>
+
+    <link rel="stylesheet" href="http://yui.yahooapis.com/pure/0.5.0/grids-responsive-old-ie-min.css">
+
+    <![endif]-->
+    <!--[if gt IE 8]><!-->
+
+    <link rel="stylesheet" href="http://yui.yahooapis.com/pure/0.5.0/grids-responsive-min.css">
+
+    <!--<![endif]-->
+
+    <!--[if lt IE 9]>
+    <script src="http://cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7/html5shiv.js"></script>
+    <![endif]-->
+
+    <style type="text/css">
+        .button-success {
+            color: white;
+            border-radius: 4px;
+            text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+        }
+
+        .button-success {
+            background: rgb(28, 184, 65); /* this is a green */
+        }
+
+        * {
+            -webkit-box-sizing: border-box;
+            -moz-box-sizing: border-box;
+            box-sizing: border-box;
+        }
+
+        a {
+            text-decoration: none;
+            color: rgb(61, 146, 201);
+        }
+
+        a:hover,
+        a:focus {
+            text-decoration: underline;
+        }
+
+        h3 {
+            font-weight: 100;
+        }
+
+        #layout {
+            padding: 0;
+        }
+
+        .header {
+            text-align: center;
+            top: auto;
+            margin: 3em auto;
+        }
+
+        .sidebar {
+            background: rgb(61, 79, 93);
+            color: #fff;
+        }
+
+        .brand-title,
+        .brand-tagline {
+            margin: 0;
+        }
+
+        .brand-title {
+            text-transform: uppercase;
+        }
+
+        .brand-tagline {
+            font-weight: 300;
+            color: rgb(176, 202, 219);
+        }
+
+        .nav-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .nav-item {
+            display: inline-block;
+            *display: inline;
+            zoom: 1;
+        }
+
+        .nav-item a {
+            background: transparent;
+            border: 2px solid rgb(176, 202, 219);
+            color: #fff;
+            margin-top: 1em;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            font-size: 85%;
+        }
+
+        .nav-item a:hover,
+        .nav-item a:focus {
+            border: 2px solid rgb(61, 146, 201);
+            text-decoration: none;
+        }
+
+        .content-subhead {
+            text-transform: uppercase;
+            color: #aaa;
+            border-bottom: 1px solid #eee;
+            padding: 0.4em 0;
+            font-size: 80%;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+        }
+
+        .content {
+            padding: 2em 1em 0;
+        }
+
+        .post {
+            padding-bottom: 2em;
+        }
+
+        .post-title {
+            font-size: 2em;
+            color: #222;
+            margin-bottom: 0.2em;
+        }
+
+        .post-description {
+            font-family: Georgia, "Cambria", serif;
+            color: #444;
+            line-height: 1.8em;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 1em 0;
+        }
+
+        .footer a {
+            color: #ccc;
+            font-size: 80%;
+        }
+
+        .footer .pure-menu a:hover,
+        .footer .pure-menu a:focus {
+            background: none;
+        }
+
+        @media (min-width: 48em) {
+            .content {
+                padding: 2em 3em 0;
+                margin-left: 25%;
+            }
+
+            .header {
+                margin: 80% 2em 0;
+                text-align: right;
+            }
+
+            .sidebar {
+                position: fixed;
+                top: 0;
+                bottom: 0;
+            }
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="layout" class="pure-g">
+    <div class="sidebar pure-u-1 pure-u-md-1-4" id="yui_3_17_2_1_1415000029737_10">
+        <div class="header">
+            <h1 class="brand-title">Gumpy web console</h1>
+
+            <h2 class="brand-tagline">动态集成容器 gumpy 简易控制台</h2>
+
+            <nav class="nav">
+                <ul class="nav-list">
+                    <li class="nav-item">
+                        <a class="pure-button" href="https://github.com/chinfeng/gumpy" target="_blank">GitHub</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="pure-button" href="mailto:13392260602@qq.cn">伊妹儿</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </div>
+
+    <div class="content pure-u-1 pure-u-md-3-4">
+        <div>
+            <!-- A wrapper for all the blog posts -->
+            <div class="posts">
+                <h1 class="content-subhead">插件仓库</h1>
+
+                <!-- A single blog post -->
+                <section class="post">
+                    <header class="post-header">
+                        <h2 class="post-title">在库插件</h2>
+                    </header>
+
+                    <div class="post-description">
+                        <table class="pure-table" ng-controller="RepoCtrl" ng-init="repo=[]">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>URI</th>
+                                <th>类型</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr ng-repeat="bundle in repo">
+                                <td ng-bind="$index + 1"></td>
+                                <td ng-bind="bundle.uri"></td>
+                                <td ng-bind="bundle.type"></td>
+                                <td>
+                                    <button class="button-success pure-button" ng-if="bundle.state == ''"
+                                            ng-click="install(bundle.uri, $index)">安装
+                                    </button>
+                                </td>
+                            </tr>
+                            </tbody>
+                        </table>
+
+                    </div>
+                </section>
+            </div>
+
+            <div class="posts">
+                <h1 class="content-subhead">插件列表</h1>
+
+                <section class="post">
+                    <header class="post-header">
+                        <h2 class="post-title">已安装插件</h2>
+
+                    </header>
+
+                    <div class="post-description">
+                        <table class="pure-table" ng-controller="BundleCtrl" ng-init="bundles=[]">
+                            <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>名称</th>
+                                <th>URI</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr ng-repeat="bundle in bundles">
+                                <td ng-bind="$index + 1"></td>
+                                <td ng-bind="bundle.name"></td>
+                                <td ng-bind="bundle.uri"></td>
+                                <td ng-bind="bundle.state"></td>
+                                <td ng-switch on="bundle.state">
+                                    <button class="button-success pure-button" ng-switch-when="ACTIVE"
+                                            ng-click="stop(bundle.name, $index)">停止
+                                    </button>
+                                    <button class="button-success pure-button" ng-switch-when="RESOLVED"
+                                            ng-click="start(bundle.name, $index)">启动
+                                    </button>
+                                </td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+                <div class="posts">
+                    <h1 class="content-subhead">部署</h1>
+
+                    <section class="post">
+                        <header class="post-header">
+                            <h2 class="post-title">部署插件</h2>
+
+                        </header>
+
+                        <div class="post-description">
+                            <form class="pure-form pure-form-stacked">
+                                <fieldset>
+                                    <input placeholder="输入插件绝对路径"/>
+                                    <button class="button-success pure-button">部署</button>
+                                </fieldset>
+                            </form>
+                        </div>
+                    </section>
+
+                </div>
+
+                <div class="footer">
+                    <div class="pure-menu pure-menu-horizontal pure-menu-open">
+                        <ul>
+                            <li><a href="javascript:alert('under construction')">About</a></li>
+                            <li><a href="https://github.com/chinfeng/gumpy">GitHub</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="http://ajax.googleapis.com/ajax/libs/angularjs/1.3.1/angular.min.js"></script>
+<script>
+    app = angular.module('myApp', []);
+    app.controller('RepoCtrl', ['$scope', '$http', function ($scope, $http) {
+        $http.get('/repo').
+                success(function (data) {
+                    $scope.repo = data;
+                }).error(function (data, status) {
+                    console.log(status);
+                });
+        $scope.install = function (uri, idx) {
+            $http.post('/install', {uri: uri}).success(function () {
+                $scope.repo[idx].state = 'RESOLVED';
+            });
+        };
+    }]).controller('BundleCtrl', ['$scope', '$http', function ($scope, $http) {
+        $http.get('/list').
+                success(function (data) {
+                    $scope.bundles = data;
+                }).error(function (data, status) {
+                    console.log(status);
+                });
+        $scope.start = function (name, idx) {
+            $http.post('/start', {name: name}).success(function () {
+                $scope.bundles[idx].state = 'ACTIVE';
+            });
+        };
+        $scope.stop = function (name, idx) {
+            $http.post('/stop', {name: name}).success(function () {
+                $scope.bundles[idx].state = 'RESOLVED';
+            });
+        };
+    }]);
+
+</script>
+
+</body>
+</html>

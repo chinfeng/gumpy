@@ -51,30 +51,27 @@ class GumCmd(Cmd):
         for fn in os.listdir(self._plugins_path):
             fp = os.path.join(self._plugins_path, fn)
             bn, ext = os.path.splitext(fn)
-            name = bn
+            uri = fn
             if bn[:2] == '__':
                 continue
             if os.path.isdir(fp) and bn[0] != '.':
                 tp = '[PKG]'
-                abs_fn = os.path.join(self._plugins_path, fn, '__init__.py')
             elif ext == '.zip':
                 tp = '[ZIP]'
-                name = fn
-                abs_fn = os.path.join(self._plugins_path, fn)
             elif ext == '.py':
                 tp = '[MOD]'
-                abs_fn = os.path.join(self._plugins_path, fn)
+                uri = bn
             else:
                 continue
 
             for bdl in self._framework.bundles.values():
-                if bdl.path == abs_fn:
+                if bdl.uri == uri:
                     st = '[%s]' % bdl.state[1]
                     break
             else:
                 st = ''
 
-            print('  {:<24}{:<24}{:<24}'.format(name, tp, st))
+            print('  {:<24}{:<24}{:<24}'.format(uri, tp, st))
 
     def do_install(self, line):
         if line[-1] == '&':

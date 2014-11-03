@@ -208,18 +208,17 @@ class BundleContext(ExecutorHelper):
         self._module = None
 
         abspath = os.path.abspath(uri)
-        if os.path.exists(abspath):
+        if os.path.isfile(abspath):
             fn, ext = os.path.splitext(os.path.basename(abspath))
-            if os.path.isfile(abspath):
-                if ext == '.py':
-                    self._module = imp.load_source(fn, abspath)
-                elif ext == '.zip':
-                    self._module = zipimport.zipimporter(abspath).load_module(fn)
+            if ext == '.py':
+                self._module = imp.load_source(fn, abspath)
+            elif ext == '.zip':
+                self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
             module_name = uri.split('.')[-1]
             self._module = __import__(uri, fromlist=(module_name, ))
-            self._path = self._module.__file__
+            self._path = os.path.dirname(self._module.__file__)
 
         if hasattr(self._module, '__symbol__'):
             self._name = self._module.__symbol__
