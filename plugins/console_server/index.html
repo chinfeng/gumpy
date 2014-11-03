@@ -288,10 +288,10 @@
                         </header>
 
                         <div class="post-description">
-                            <form class="pure-form pure-form-stacked">
+                            <form class="pure-form pure-form-stacked" ng-controller="InstallionCtrl">
                                 <fieldset>
-                                    <input placeholder="输入插件绝对路径"/>
-                                    <button class="button-success pure-button">部署</button>
+                                    <input ng-model="uri" placeholder="输入插件绝对路径"/>
+                                    <button class="button-success pure-button" ng-click="install(uri)">部署</button>
                                 </fieldset>
                             </form>
                         </div>
@@ -342,6 +342,12 @@
         $scope.stop = function (name, idx) {
             $http.post('/stop', {name: name}).success(function () {
                 $scope.bundles[idx].state = 'RESOLVED';
+            });
+        };
+    }]).controller('InstallionCtrl', ['$scope', '$http', function($scope, $http) {
+        $scope.install = function (uri) {
+            $http.post('/install', {uri: uri}).success(function () {
+                location.reload();
             });
         };
     }]);
