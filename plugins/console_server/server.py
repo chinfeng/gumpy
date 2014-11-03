@@ -29,6 +29,7 @@ parser.add_argument('-p', '--path',
                     dest='plugins_path', default='plugins',
                     help='plugins directory')
 _plugins_path = parser.parse_args().plugins_path
+_config_path = os.path.join(_plugins_path, 'config.ini')
 
 def _repo(framework):
     rt = []
@@ -79,42 +80,44 @@ class WSGIApplication(object):
             if not path or path == '/':
                 abs_path = os.path.join(os.path.dirname(__file__), 'index.html')
                 start_response('200 OK', [('content-type', 'text/html'), ])
-                with open(abs_path, 'r') as fd:
+                with open(abs_path, 'rb') as fd:
                     for chunk in FileWrapper(fd):
                         yield chunk
             elif ext in _MIME_TABLE:
                 headers = [('content-type', _MIME_TABLE[ext])]
                 start_response('200 OK', headers)
                 abs_path = os.path.dirname(__file__) + path.replace('/', os.path.sep)
-                with open(abs_path, 'r') as fd:
+                with open(abs_path, 'rb') as fd:
                     for chunk in FileWrapper(fd):
                         yield chunk
             else:
                 path = (environ.get('SCRIPT_NAME', '') + environ.get('PATH_INFO', '')).split('/')
                 action = path[1]
-                params = json.loads(environ['wsgi.input'].read(int(environ['CONTENT_LENGTH'])) if environ['CONTENT_LENGTH'] else '{}', encoding='UTF-8')
+                params = json.loads(environ['wsgi.input'].read(int(environ['CONTENT_LENGTH'])).decode('utf-8') if environ['CONTENT_LENGTH'] else '{}', encoding='UTF-8')
                 if action == 'repo':
                     rt = _repo(self._framework)
                 elif action == 'list':
                     rt = _list(self._framework)
                 elif action == 'install' and environ["REQUEST_METHOD"].lower() == 'post':
-                    self._framework.install_bundle(params['uri'])
-                    rt = dict(install_result='ok')
+                    _f = self._framework.install_bundle(params['uri'])
+                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    rt = dict(install_result=u'ok')
                 elif action == 'start' and environ["REQUEST_METHOD"].lower() == 'post':
-                    self._framework.bundles[params['name']].start()
-                    rt = dict(start_result='ok')
+                    _f = self._framework.bundles[params['name']].start()
+                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    rt = dict(start_result=u'ok')
                 elif action == 'stop' and environ["REQUEST_METHOD"].lower() == 'post':
-                    self._framework.bundles[params['name']].stop()
-                    rt = dict(start_result='ok')
+                    _f = self._framework.bundles[params['name']].stop()
+                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    rt = dict(start_result=u'ok')
                 else:
                     start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
                     yield '404: Not Found'
-                    return
+                    raise GeneratorExit()
                 start_response('200 OK', [('Content-type', 'application/json'), ])
-                yield json.dumps(rt, encoding='utf-8', indent=4)
+                yield json.dumps(rt, indent=4).encode('utf-8')
         except BaseException as err:
             start_response('500 INTERNAL SERVER ERROR', [('Content-type', 'text/plain'), ])
-            print(err)
             yield err.args[0]
 
 @service

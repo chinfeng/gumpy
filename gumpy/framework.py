@@ -7,6 +7,7 @@ import zipimport
 import itertools
 import threading
 import collections
+import configparser
 from .executor import ExecutorHelper, async
 
 try:
@@ -352,8 +353,8 @@ class Framework(ExecutorHelper):
         return self._bundles.get(uri, default)
 
     @async
-    def install_bundle(self, position):
-        bdl = BundleContext(self, position)
+    def install_bundle(self, uri):
+        bdl = BundleContext(self, uri)
         self._bundles[bdl.name] = bdl
         return bdl
 
@@ -377,6 +378,34 @@ class Framework(ExecutorHelper):
             return self._bundles[u.bundle].get_service_reference_by_name(u.service)
         else:
             return self._bundles[u.bundle]
+
+    def load_state(self, path):
+        state_config = configparser.ConfigParser()
+        if os.path.exists(path):
+            state_config.read(path)
+
+        for section in state_config.sections():
+            try:
+                uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
+                if section not in self.bundles:
+                    bdl = self.install_bundle(section).result()
+                else:
+                    bdl = uri_dict[section]
+                if state_config.getboolean(section, 'start'):
+                    bdl.start().result()
+            except configparser.NoOptionError:
+                pass
+            except BaseException as e:
+                print('  bundle {0} init error:'.format(section), e)
+
+    def save_state(self, path):
+        state_config = configparser.ConfigParser()
+
+        for bdl in self.bundles.values():
+            state_config.add_section(bdl.uri)
+            state_config.set(bdl.uri, 'start', str(bdl.state == bdl.ST_ACTIVE))
+        with open(path, 'w') as fd:
+            state_config.write(fd)
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

@@ -19,27 +19,13 @@ class GumCmd(Cmd):
 
         self._config = configparser.ConfigParser()
         config_fn = os.path.join(self._plugins_path, 'config.ini')
-        if os.path.exists(config_fn):
-            self._config.read(config_fn)
-
-        for section in self._config.sections():
-            try:
-                _f = self._framework.install_bundle(section)
-                if self._config.get(section, 'start'):
-                    _f.result().start().result()
-            except configparser.NoOptionError:
-                pass
-            except BaseException as e:
-                print('  bundle {0} init error:'.format(section), e)
-                self._config.remove_section(section)
-
+        self._framework.load_state(config_fn)
 
         self.intro = 'Gumpy runtime console'
         self.prompt = '>>> '
 
     def _save_config(self):
-        with open(os.path.join(self._plugins_path, 'config.ini'), 'w') as fd:
-            self._config.write(fd)
+        self._framework.save_state(os.path.join(self._plugins_path, 'config.ini'))
 
     def do_EOF(self, line):
         return True
@@ -89,10 +75,7 @@ class GumCmd(Cmd):
             f = self._framework.install_bundle(uri)
             if not async:
                 f.result()
-
-            if uri not in self._config.sections():
-                self._config.add_section(uri)
-                self._save_config()
+            self._save_config()
         except BaseException as e:
             print(e)
 
@@ -115,7 +98,6 @@ class GumCmd(Cmd):
                 f = bdl.start()
                 if not async:
                     f.result()
-                self._config.set(bdl.uri, 'start', 1)
                 self._save_config()
             except BaseException as err:
                 print(err)
@@ -136,7 +118,6 @@ class GumCmd(Cmd):
                 f = bdl.stop()
                 if not async:
                     f.result()
-                self._config.set(bdl.uri, 'start', 0)
                 self._save_config()
             except BaseException as err:
                 print(err)
