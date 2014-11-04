@@ -3,11 +3,15 @@ __author__ = 'chinfeng'
 
 import os
 import imp
+import importlib
 import zipimport
 import itertools
 import threading
 import collections
-import configparser
+try:
+    import ConfigParser as configparser
+except ImportError:
+    import configparser
 from .executor import ExecutorHelper, async
 
 try:
@@ -217,7 +221,11 @@ class BundleContext(ExecutorHelper):
                 self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
-            self._module = __import__(uri)
+            self._module = importlib.import_module(uri)
+            try:
+                reload(self._module)
+            except NameError:
+                imp.reload(self._module)
             self._path = os.path.dirname(self._module.__file__)
 
         if hasattr(self._module, '__symbol__'):
