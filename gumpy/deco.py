@@ -2,6 +2,7 @@
 __author__ = 'chinfeng'
 
 import functools
+import collections
 
 from .framework import (
     ServiceReference, _ManagerHelper, binder, unbinder,
@@ -22,18 +23,22 @@ class _SettingsDeco(object):
     def merge_settings(self, helper_settings):
         return dict(helper_settings, **self._settings)
 
-class _MultiElementSettingsDeco(_SettingsDeco):
+class _RecursiveStringSettingsDeco(_SettingsDeco):
+    def _recursive_flat(self, ir):
+        if type(ir) is str:
+            yield ir
+        elif isinstance(ir, collections.Iterable):
+            for elm in ir:
+                for e in self._recursive_flat(elm):
+                    yield e
     def merge_settings(self, helper_settings):
+        rt = {}
         for k, v in self._settings.items():
             if k in helper_settings:
-                hv = helper_settings[k]
-                if isinstance(helper_settings[k], set):
-                    hv.add(v)
-                else:
-                    helper_settings[k] = {v, hv}
+                rt[k] = set(self._recursive_flat((v, helper_settings[k])))
             else:
-                helper_settings[k] = {v} if not isinstance(v, set) else v
-        return helper_settings
+                rt[k] = set(self._recursive_flat(v))
+        return rt
 
 class _ManagerTypeDefinition(_SettingsDeco):
     def __init__(self, manager_type, **kwds):
@@ -47,7 +52,7 @@ class _ManagerTypeDefinition(_SettingsDeco):
         else:
             return _ManagerHelper(wrapped, self._manager_type, self.merge_settings({}))
 
-provide = lambda resource: _MultiElementSettingsDeco(provides=resource)
+provide = lambda *res: _RecursiveStringSettingsDeco(provides=res)
 service = lambda name: _ManagerTypeDefinition(ServiceReference)(name) if not isinstance(name, str) else _ManagerTypeDefinition(ServiceReference, name=name)
 
 def require(*service_names, **service_dict):
