@@ -60,7 +60,7 @@ def require(*service_names, **service_dict):
         def injected_func(self, *args, **kwds):
             _args = list(args)
             _kwds = kwds.copy()
-            timeout = _kwds.get('__timeout__', 0)
+            timeout = _kwds.get('__timeout__', None)
             for sn in service_names:
                 try:
                     _args.append(self.__context__.get_service(sn, timeout))

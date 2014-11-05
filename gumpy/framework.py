@@ -175,12 +175,14 @@ class ServiceReference(object):
             members = (getattr(instance, an) for an in dir(instance))
             self._consumers = set(filter(lambda obj: isinstance(obj, _consumer), members))
             self.__framework__.register_consumers(self._consumers)
-            self.__framework__.register_producer(self)
+            if self.provides:
+                self.__framework__.register_producer(self)
 
     def stop(self):
         if self._instance:
             self.__framework__.unregister_consumers(self._consumers)
-            self.__framework__.unregister_producer(self)
+            if self.provides:
+                self.__framework__.unregister_producer(self)
             self._consumers = None
             if 'on_stop' in dir(self._instance):
                 self._instance.on_stop()
@@ -272,23 +274,32 @@ class BundleContext(ExecutorHelper):
     def __framework__(self):
         return self._framework
 
+    def _check_satisfied(self):
+        return True
+
     @async
     def start(self):
         if self._state == self.ST_RESOLVED:
+            self._state = self.ST_STARTING
             self._activator()
             for sr in self._service_references.values():
                 sr.start()
             self._state = self.ST_ACTIVE
+        elif self._state == self.ST_STARTING:
+            pass
         else:
             raise BundleUnavailableError('bundle {0} cannot start while {1}'.format(self.name, self.state[1]))
 
     @async
     def stop(self):
         if self._state == self.ST_ACTIVE:
+            self._state = self.ST_STOPING
             for sr in self._service_references.values():
                 sr.stop()
             self._deactivator()
             self._state = self.ST_RESOLVED
+        elif self._state == self.ST_STOPING:
+            pass
         else:
             raise BundleUnavailableError('bundle {0} cannot stop while {1}'.format(self.name, self.state[1]))
 
@@ -324,8 +335,9 @@ class Framework(ExecutorHelper):
 
     def register_consumers(self, consumers):
         with self._lock:
-            binders = {c for c in consumers if isinstance(c, binder)}
-            unbinders = {c for c in consumers if isinstance(c, unbinder)}
+            c1, c2 = itertools.tee(consumers)
+            binders = set(itertools.takewhile(lambda x: isinstance(x, binder), c1))
+            unbinders = set(itertools.takewhile(lambda x: isinstance(x, unbinder), c1))
             self._binders |= binders
             self._unbinders |= unbinders
             work_list = list(itertools.product(binders, self._producers))
@@ -333,8 +345,9 @@ class Framework(ExecutorHelper):
 
     def unregister_consumers(self, consumers):
         with self._lock:
-            binders = {c for c in consumers if isinstance(c, binder)}
-            unbinders = {c for c in consumers if isinstance(c, unbinder)}
+            c1, c2 = itertools.tee(consumers)
+            binders = set(itertools.takewhile(lambda x: isinstance(x, binder), c1))
+            unbinders = set(itertools.takewhile(lambda x: isinstance(x, unbinder), c1))
             self._binders -= binders
             self._unbinders -= unbinders
             work_list = list(itertools.product(unbinders, self._producers))
