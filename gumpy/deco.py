@@ -52,7 +52,7 @@ class _ManagerTypeDefinition(_SettingsDeco):
         else:
             return _ManagerHelper(wrapped, self._manager_type, self.merge_settings({}))
 
-provide = lambda *res: _RecursiveStringSettingsDeco(provides=res)
+provide = lambda res, *args: _RecursiveStringSettingsDeco(provides=res if not args else (res, ) + args)
 service = lambda name: _ManagerTypeDefinition(ServiceReference)(name) if not isinstance(name, str) else _ManagerTypeDefinition(ServiceReference, name=name)
 
 def require(*service_names, **service_dict):
@@ -96,5 +96,4 @@ class _UnbinderHelper(object):
         else:
             raise TypeError('Service instance is needed for a unbinder')
 
-bind = lambda uri: functools.partial(_BinderHelper, resource_uri=uri)
-unbind = lambda uri: functools.partial(_UnbinderHelper, resource_uri=uri)
+bind = lambda resource: functools.partial(_BinderHelper, resource_uri=resource)

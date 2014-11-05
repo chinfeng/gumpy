@@ -14,11 +14,6 @@ except ImportError:
     import configparser
 from .executor import ExecutorHelper, async
 
-try:
-    from itertools import izip_longest
-except ImportError:
-    from itertools import zip_longest as izip_longest
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -172,8 +167,9 @@ class ServiceReference(object):
                 instance.on_start()
             self._instance = instance
             self._evt.set()
-            members = (getattr(instance, an) for an in dir(instance))
-            self._consumers = set(filter(lambda obj: isinstance(obj, _consumer), members))
+            self._consumers = set(filter(
+                lambda obj: isinstance(obj, _consumer),
+                (getattr(instance, an) for an in dir(instance))))
             self.__framework__.register_consumers(self._consumers)
             if self.provides:
                 self.__framework__.register_producer(self)
@@ -203,6 +199,7 @@ class BundleContext(ExecutorHelper):
     ST_ACTIVE = _immutable_prop((3, 'ACTIVE'))
     ST_STOPING = _immutable_prop((4, 'STOPING'))
     ST_UNINSTALLED = _immutable_prop((5, 'UNINSTALLED'))
+    ST_UNSATISFIED = _immutable_prop((6, 'ST_UNSATISFIED'))
 
     def __init__(self, framework, uri):
         ExecutorHelper.__init__(self, framework.__executor__)
@@ -274,9 +271,6 @@ class BundleContext(ExecutorHelper):
     def __framework__(self):
         return self._framework
 
-    def _check_satisfied(self):
-        return True
-
     @async
     def start(self):
         if self._state == self.ST_RESOLVED:
@@ -336,8 +330,8 @@ class Framework(ExecutorHelper):
     def register_consumers(self, consumers):
         with self._lock:
             c1, c2 = itertools.tee(consumers)
-            binders = set(itertools.takewhile(lambda x: isinstance(x, binder), c1))
-            unbinders = set(itertools.takewhile(lambda x: isinstance(x, unbinder), c1))
+            binders = set(filter(lambda x: isinstance(x, binder), c1))
+            unbinders = set(filter(lambda x: isinstance(x, unbinder), c2))
             self._binders |= binders
             self._unbinders |= unbinders
             work_list = list(itertools.product(binders, self._producers))
@@ -346,8 +340,8 @@ class Framework(ExecutorHelper):
     def unregister_consumers(self, consumers):
         with self._lock:
             c1, c2 = itertools.tee(consumers)
-            binders = set(itertools.takewhile(lambda x: isinstance(x, binder), c1))
-            unbinders = set(itertools.takewhile(lambda x: isinstance(x, unbinder), c1))
+            binders = set(filter(lambda x: isinstance(x, binder), c1))
+            unbinders = set(filter(lambda x: isinstance(x, unbinder), c2))
             self._binders -= binders
             self._unbinders -= unbinders
             work_list = list(itertools.product(unbinders, self._producers))
