@@ -4,6 +4,7 @@ __author__ = 'chinfeng'
 import sys
 import os
 from cmd import Cmd
+from . import LocalConfiguration
 
 try:
     import ConfigParser as configparser
@@ -15,17 +16,14 @@ class GumCmd(Cmd):
         Cmd.__init__(self)
         self._framework = framework
         self._plugins_path = os.path.abspath(plugins_path)
-        sys.path.append(self._plugins_path)
 
-        self._config = configparser.ConfigParser()
-        config_fn = os.path.join(self._plugins_path, 'config.ini')
-        self._framework.load_state(config_fn)
+        self._framework.restore_state()
 
         self.intro = 'Gumpy runtime console'
         self.prompt = '>>> '
 
     def _save_config(self):
-        self._framework.save_state(os.path.join(self._plugins_path, 'config.ini'))
+        self._framework.save_state()
 
     def do_EOF(self, line):
         return True
@@ -127,3 +125,10 @@ class GumCmd(Cmd):
     def do_call(self, line):
         service_uri, call_caluse = line.split('.', 1)
         print(eval('self._framework.get_service(\'{0}\').{1}'.format(service_uri, call_caluse)))
+
+    def do_conf(self, line):
+        bn, key, value = line.split(' ')
+        conf = self._framework.configuration[bn]
+        conf[key] = value if not value.isdigit() else int(value)
+        conf.persist()
+

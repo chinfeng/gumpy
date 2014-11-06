@@ -10,3 +10,7 @@ from .framework import (
     Framework,
     default_framework,
 )
+
+from .configuration import (
+    LocalConfiguration
+)

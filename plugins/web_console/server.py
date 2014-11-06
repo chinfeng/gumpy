@@ -100,19 +100,19 @@ class WSGIApplication(object):
                     rt = _list(self._framework)
                 elif action == 'install' and environ["REQUEST_METHOD"].lower() == 'post':
                     _f = self._framework.install_bundle(params['uri'])
-                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    _f.add_done_callback(lambda rt: self._framework.save_state())
                     rt = dict(install_result=u'ok')
                 elif action == 'start' and environ["REQUEST_METHOD"].lower() == 'post':
                     _f = self._framework.bundles[params['name']].start()
-                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    _f.add_done_callback(lambda rt: self._framework.save_state())
                     rt = dict(start_result=u'ok')
                 elif action == 'stop' and environ["REQUEST_METHOD"].lower() == 'post':
                     _f = self._framework.bundles[params['name']].stop()
-                    _f.add_done_callback(lambda rt: self._framework.save_state(_config_path))
+                    _f.add_done_callback(lambda rt: self._framework.save_state())
                     rt = dict(start_result=u'ok')
                 else:
                     start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
-                    yield '404: Not Found'
+                    yield '404: Not Found'.encode('utf-8')
                     raise StopIteration
                 start_response('200 OK', [('Content-type', 'application/json'), ])
                 yield json.dumps(rt, indent=4).encode('utf-8')

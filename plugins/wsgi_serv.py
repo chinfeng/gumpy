@@ -15,25 +15,31 @@ class WSGIServer(threading.Thread):
         super(self.__class__, self).__init__()
         self.daemon = True
         self._apps = {}
+        self._server = None
 
     def run(self):
         try:
-            from wsgiref.simple_server import make_server
-            self._httpd = make_server('', self._port, self._wsgi_app)
-            self._httpd.serve_forever()
+            from tornado.wsgi import WSGIContainer
+            from tornado.httpserver import HTTPServer
+            from tornado.ioloop import IOLoop
+            container = WSGIContainer(self._wsgi_app)
+            self._server = HTTPServer(container)
+            self._server.listen(self._port)
+            IOLoop.instance().start()
         except BaseException as e:
-            logger.error('simple_wsgi_serv httpd fails')
+            logger.error('wsgi_serv httpd fail to start')
             logger.exception(e)
 
     def on_start(self):
         self._conf = self.__context__.configuration
-        self._port = self._conf.get('port', 8080)
+        self._port = self._conf.get('port', 8888)
         self.start()
 
     def on_stop(self):
-        self._conf.persist()
-        if self._httpd:
-            self._httpd.shutdown()
+        from tornado.ioloop import IOLoop
+        ioloop = IOLoop.instance()
+        ioloop.add_callback(self._server.stop)
+        ioloop.add_callback(ioloop.stop)
 
     @bind('wsgi.application')
     def wsgi_application(self, app):

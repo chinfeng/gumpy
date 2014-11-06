@@ -13,6 +13,7 @@ try:
 except ImportError:
     import configparser
 from .executor import ExecutorHelper, async
+from .configuration import LocalConfiguration
 
 import logging
 logger = logging.getLogger(__name__)
@@ -271,6 +272,10 @@ class BundleContext(ExecutorHelper):
     def __framework__(self):
         return self._framework
 
+    @property
+    def configuration(self):
+        return self._framework.configuration[self._name]
+
     @async
     def start(self):
         if self._state == self.ST_RESOLVED:
@@ -315,13 +320,15 @@ class BundleContext(ExecutorHelper):
         return sr.get_service(timeout) if sr else None
 
 class Framework(ExecutorHelper):
-    def __init__(self):
+    def __init__(self, configuration=None):
         ExecutorHelper.__init__(self)
         self._bundles = {}
         self._lock = threading.Lock()
         self._binders = set()
         self._unbinders = set()
         self._producers = set()
+        self._configuration = configuration or LocalConfiguration()
+        self._state_conf = self.configuration['.state']
 
     def _consume(self, work_list):
         for consumer, producer in work_list:
@@ -363,6 +370,10 @@ class Framework(ExecutorHelper):
     def bundles(self):
         return self._bundles
 
+    @property
+    def configuration(self):
+        return self._configuration
+
     def get_bundle(self, uri, default=None):
         return self._bundles.get(uri, default)
 
@@ -393,33 +404,24 @@ class Framework(ExecutorHelper):
         else:
             return self._bundles[u.bundle]
 
-    def load_state(self, path):
-        state_config = configparser.ConfigParser()
-        if os.path.exists(path):
-            state_config.read(path)
-
-        for section in state_config.sections():
+    def restore_state(self):
+        uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
+        for uri, start in self._state_conf.items():
             try:
-                uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
-                if section not in uri_dict:
-                    bdl = self.install_bundle(section).result()
+                if uri not in uri_dict:
+                    bdl = self.install_bundle(uri).result()
                 else:
-                    bdl = uri_dict[section]
-                if state_config.getboolean(section, 'start'):
+                    bdl = uri_dict[uri]
+                if start:
                     bdl.start().result()
-            except configparser.NoOptionError:
-                pass
             except BaseException as e:
-                print('  bundle {0} init error:'.format(section), e)
+                logger.error('bundle {0} init error:'.format(uri))
+                logger.exception(e)
 
-    def save_state(self, path):
-        state_config = configparser.ConfigParser()
-
+    def save_state(self):
         for bdl in self.bundles.values():
-            state_config.add_section(bdl.uri)
-            state_config.set(bdl.uri, 'start', str(bdl.state == bdl.ST_ACTIVE))
-        with open(path, 'w') as fd:
-            state_config.write(fd)
+            self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
+        self._state_conf.persist()
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None
