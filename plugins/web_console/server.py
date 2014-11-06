@@ -113,7 +113,7 @@ class WSGIApplication(object):
                 else:
                     start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
                     yield '404: Not Found'
-                    raise GeneratorExit()
+                    raise StopIteration
                 start_response('200 OK', [('Content-type', 'application/json'), ])
                 yield json.dumps(rt, indent=4).encode('utf-8')
         except BaseException as err:
