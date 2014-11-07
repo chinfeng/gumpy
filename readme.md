@@ -61,4 +61,4 @@
 
     >>> conf wsgi_serv port 8080
     
-控制台会在每次修改配置后会触发对应组件的 on_configuration_changed 事件，该组件在改变端口后自动重启服务器。配置获取方式与事件处理代码详见 [wsgi_serv.py](blob/master/plugins/wsgi_serv.py)。
+控制台会在每次修改配置后会触发对应组件的 on_configuration_changed 事件，该组件在改变端口后自动重启服务器。配置获取方式与事件处理代码详见 [wsgi_serv.py](plugins/wsgi_serv.py)。
