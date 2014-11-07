@@ -13,7 +13,15 @@ class SampleServiceA(object):
     def foo(self, sa):
         return sa
 
+    @event
+    def on_test_event(self, txt):
+        self.evt_msg = txt
+
 @provide('sample_res_two')
 @service
 class SampleServiceB(object):
     pass
+
+    @event
+    def on_test_event(self, txt):
+        self.evt_msg = txt

@@ -67,6 +67,17 @@ class GumTestCase(TestCase):
         self.assertIn(msb, msa.twos)
         self.assertIn(fsb, msa.twos)
 
+        bdl = fmk.get_bundle('file_bdl')
+        bdl.em.on_test_event.send('file_test')
+        self.assertEqual(fsa.evt_msg, 'file_test')
+        self.assertEqual(fsb.evt_msg, 'file_test')
+
+        self._fmk.em.on_test_event.send('global_evt_test')
+        self.assertEqual(msa.evt_msg, 'global_evt_test')
+        self.assertEqual(msb.evt_msg, 'global_evt_test')
+        self.assertEqual(fsa.evt_msg, 'global_evt_test')
+        self.assertEqual(fsb.evt_msg, 'global_evt_test')
+
         fmk.get_bundle('file_bdl').stop().result()
         self.assertNotIn(fsa, msa.ones)
         self.assertNotIn(fsb, msa.twos)

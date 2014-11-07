@@ -66,7 +66,7 @@ class WSGIServer(threading.Thread):
 
     @event
     def on_configuration_changed(self, key, value):
-        if key == 'port' and value != self._port:
+        if key == 'port':
             ctx = self.__context__
             ctx.stop().add_done_callback(lambda rt, bdl=ctx: bdl.start())
 

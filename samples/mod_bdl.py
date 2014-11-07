@@ -42,6 +42,10 @@ class SampleServiceA(object):
         logger.debug('sr_two unbind: {0}'.format(res))
         self.twos.remove(res)
 
+    @event
+    def on_test_event(self, txt):
+        self.evt_msg = txt
+
 @service
 @provide('sample_res_two')
 class SampleServiceB(object):
@@ -52,3 +56,7 @@ class SampleServiceB(object):
     @require(sa='mod_bdl:SampleServiceA')
     def foo2(self, sa):
         return sa
+
+    @event
+    def on_test_event(self, txt):
+        self.evt_msg = txt
