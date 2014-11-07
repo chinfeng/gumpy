@@ -129,6 +129,10 @@ class GumCmd(Cmd):
     def do_conf(self, line):
         bn, key, value = line.split(' ')
         conf = self._framework.configuration[bn]
-        conf[key] = value if not value.isdigit() else int(value)
+        val = value if not value.isdigit() else int(value)
+        conf[key] = val
+        evt = self._framework.bundles[bn].em.on_configuration_changed
+        evt.send(key, val)
         conf.persist()
+
 

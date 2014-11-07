@@ -93,7 +93,7 @@ class _ManagerHelper(object):
         tp = self.manager_type
         return tp(self._managed_object, **dict(self.settings, **kwds)) if tp else None
 
-class _callable(object):
+class _Callable(object):
     def __init__(self, func):
         if callable(func):
             self._func = func
@@ -102,15 +102,15 @@ class _callable(object):
     def __call__(self, *args, **kwds):
         self._func(*args, **kwds)
 
-class activator(_callable):
+class Activator(_Callable):
     def __init__(self, func):
         super(self.__class__, self).__init__(func)
 
-class deactivator(_callable):
+class Deactivator(_Callable):
     def __init__(self, func):
         super(self.__class__, self).__init__(func)
 
-class _consumer(object):
+class _Consumer(object):
     def __init__(self, instance, func, resource_uri):
         self._instance = instance
         self._func = func
@@ -124,11 +124,44 @@ class _consumer(object):
     def resource_uri(self):
         return self._resource_uri
 
-class binder(_consumer):
+class Binder(_Consumer):
     pass
 
-class unbinder(_consumer):
+class Unbinder(_Consumer):
     pass
+
+class EventSlot(object):
+    def __init__(self, instance, func):
+        self._name = func.__name__
+        self._instance = instance
+        self._func = func
+
+    def call(self, *args, **kwds):
+        return self._func(self._instance, *args, **kwds)
+
+    @property
+    def name(self):
+        return self._name
+
+class _EventProxy(object):
+    def __init__(self, events=None):
+        self._events = events or set()
+
+    def send(self, *args, **kwds):
+        for e in self._events:
+            e.call(*args, **kwds)
+
+class _EventManager(object):
+    def __init__(self, owner):
+        self._owner = owner
+
+    def __getattr__(self, key):
+        return _EventProxy(
+            (e for e in (self._owner.events or set()) if e.name == key)
+        )
+
+    def __getitem__(self, item):
+        return self.__getattr__(item)
 
 class ServiceReference(object):
     def __init__(self, cls, name=None, provides=None):
@@ -141,6 +174,7 @@ class ServiceReference(object):
         self.__context__ = None
         self.__framework__ = None
         self._consumers = None
+        self._events = None
 
     @property
     def name(self):
@@ -158,6 +192,10 @@ class ServiceReference(object):
     def consumers(self):
         return self._consumers
 
+    @property
+    def events(self):
+        return self._events
+
     def start(self):
         if not self._instance:
             instance = self._cls()
@@ -167,9 +205,13 @@ class ServiceReference(object):
             if 'on_start' in dir(instance):
                 instance.on_start()
             self._instance = instance
+            self._events = set(filter(
+                lambda obj: isinstance(obj, EventSlot),
+                (getattr(instance, an) for an in dir(instance))))
+            self.__context__.events |= self._events
             self._evt.set()
             self._consumers = set(filter(
-                lambda obj: isinstance(obj, _consumer),
+                lambda obj: isinstance(obj, _Consumer),
                 (getattr(instance, an) for an in dir(instance))))
             self.__framework__.register_consumers(self._consumers)
             if self.provides:
@@ -181,6 +223,8 @@ class ServiceReference(object):
             if self.provides:
                 self.__framework__.unregister_producer(self)
             self._consumers = None
+            self.__context__.events -= self._events
+            self._events = None
             if 'on_stop' in dir(self._instance):
                 self._instance.on_stop()
             del self._instance
@@ -212,6 +256,9 @@ class BundleContext(ExecutorHelper):
         self._deactivator = lambda: None
         self._module = None
 
+        self._events = set()
+        self._event_manager = _EventManager(self)
+
         abspath = os.path.abspath(uri)
         if os.path.isfile(abspath):
             fn, ext = os.path.splitext(os.path.basename(abspath))
@@ -237,9 +284,9 @@ class BundleContext(ExecutorHelper):
             attr = getattr(self._module, attr_name)
             if isinstance(attr, _ManagerHelper):
                 manager = attr.to_managed()
-                if isinstance(manager, activator):
+                if isinstance(manager, Activator):
                     self._activator = manager
-                elif isinstance(manager, deactivator):
+                elif isinstance(manager, Deactivator):
                     self._deactivator = manager
                 elif isinstance(manager, ServiceReference):
                     manager.__context__ = self
@@ -275,6 +322,21 @@ class BundleContext(ExecutorHelper):
     @property
     def configuration(self):
         return self._framework.configuration[self._name]
+
+    @property
+    def event_manager(self):
+        return self._event_manager
+
+    @property
+    def em(self):
+        return self._event_manager
+
+    @property
+    def events(self):
+        return self._events
+    @events.setter
+    def events(self, es):
+        self._events = es
 
     @async
     def start(self):
@@ -319,6 +381,13 @@ class BundleContext(ExecutorHelper):
         sr = self.get_service_reference(uri)
         return sr.get_service(timeout) if sr else None
 
+    def get(self, uri):
+        u = service_uri(uri)
+        if u.service:
+            return self.__framework__.bundles[u.bundle].get_service_reference_by_name(u.service)
+        else:
+            return self.__framework__.bundles[u.bundle]
+
 class Framework(ExecutorHelper):
     def __init__(self, configuration=None):
         ExecutorHelper.__init__(self)
@@ -329,6 +398,7 @@ class Framework(ExecutorHelper):
         self._producers = set()
         self._configuration = configuration or LocalConfiguration()
         self._state_conf = self.configuration['.state']
+        self._event_manager = _EventManager(self)
 
     def _consume(self, work_list):
         for consumer, producer in work_list:
@@ -337,8 +407,8 @@ class Framework(ExecutorHelper):
     def register_consumers(self, consumers):
         with self._lock:
             c1, c2 = itertools.tee(consumers)
-            binders = set(filter(lambda x: isinstance(x, binder), c1))
-            unbinders = set(filter(lambda x: isinstance(x, unbinder), c2))
+            binders = set(filter(lambda x: isinstance(x, Binder), c1))
+            unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
             self._binders |= binders
             self._unbinders |= unbinders
             work_list = list(itertools.product(binders, self._producers))
@@ -347,8 +417,8 @@ class Framework(ExecutorHelper):
     def unregister_consumers(self, consumers):
         with self._lock:
             c1, c2 = itertools.tee(consumers)
-            binders = set(filter(lambda x: isinstance(x, binder), c1))
-            unbinders = set(filter(lambda x: isinstance(x, unbinder), c2))
+            binders = set(filter(lambda x: isinstance(x, Binder), c1))
+            unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
             self._binders -= binders
             self._unbinders -= unbinders
             work_list = list(itertools.product(unbinders, self._producers))
@@ -373,6 +443,20 @@ class Framework(ExecutorHelper):
     @property
     def configuration(self):
         return self._configuration
+
+    @property
+    def events(self):
+        for bdl in self.bundles.values():
+            for e in bdl.events:
+                yield e
+
+    @property
+    def event_manager(self):
+        return self._event_manager
+
+    @property
+    def em(self):
+        return self._event_manager
 
     def get_bundle(self, uri, default=None):
         return self._bundles.get(uri, default)

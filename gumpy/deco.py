@@ -5,11 +5,11 @@ import functools
 import collections
 
 from .framework import (
-    ServiceReference, _ManagerHelper, binder, unbinder,
-    activator, deactivator, ServiceUnavaliableError)
+    ServiceReference, _ManagerHelper, Binder, Unbinder,
+    EventSlot, Activator, Deactivator, ServiceUnavaliableError)
 
-activate = lambda func: _ManagerTypeDefinition(activator)(func)
-deactivate = lambda func: _ManagerTypeDefinition(deactivator)(func)
+activate = lambda func: _ManagerTypeDefinition(Activator)(func)
+deactivate = lambda func: _ManagerTypeDefinition(Deactivator)(func)
 
 class _SettingsDeco(object):
     def __init__(self, **kwds):
@@ -82,7 +82,7 @@ class _BinderHelper(object):
         self.unbind = functools.partial(_UnbinderHelper, resource_uri=self._resource_uri)
     def __get__(self, instance, owner):
         if instance:
-            return binder(instance, self._func, self._resource_uri)
+            return Binder(instance, self._func, self._resource_uri)
         else:
             raise TypeError('Service instance is needed for a binder')
 
@@ -92,8 +92,34 @@ class _UnbinderHelper(object):
         self._resource_uri = resource_uri
     def __get__(self, instance, owner):
         if instance:
-            return unbinder(instance, self._func, self._resource_uri)
+            return Unbinder(instance, self._func, self._resource_uri)
         else:
             raise TypeError('Service instance is needed for a unbinder')
 
 bind = lambda resource: functools.partial(_BinderHelper, resource_uri=resource)
+
+class _EventHepler(object):
+    def __init__(self, func):
+        self._func = func
+    def __get__(self, instance, owner):
+        if instance:
+            return EventSlot(instance, self._func)
+        else:
+            raise TypeError('Service instance needed for event ')
+
+event = _EventHepler
+
+def configuration(*keys):
+    def deco(func):
+        def configuration_injected_func(self, *args, **kwds):
+            _kwds = kwds.copy()
+            config = self.__context__.configuration
+            for key in keys:
+                try:
+                    if key in config:
+                        _kwds[key] = config.get(key)
+                except:
+                    pass
+            return func(self, *args, **_kwds)
+        return configuration_injected_func
+    return deco

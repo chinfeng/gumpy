@@ -59,6 +59,8 @@ class _LocalDocument(object):
         return self._dict_object.values()
     def items(self):
         return self._dict_object.items()
+    def __iter__(self):
+        return self._dict_object.__iter__()
     def persist(self):
         if self._fn:
             with open(self._fn, 'w') as fd:

@@ -17,22 +17,21 @@ class WSGIServer(threading.Thread):
         self._apps = {}
         self._server = None
 
-    def run(self):
+    @configuration('port')
+    def run(self, port=8888):
         try:
             from tornado.wsgi import WSGIContainer
             from tornado.httpserver import HTTPServer
             from tornado.ioloop import IOLoop
             container = WSGIContainer(self._wsgi_app)
             self._server = HTTPServer(container)
-            self._server.listen(self._port)
+            self._server.listen(port)
             IOLoop.instance().start()
         except BaseException as e:
             logger.error('wsgi_serv httpd fail to start')
             logger.exception(e)
 
     def on_start(self):
-        self._conf = self.__context__.configuration
-        self._port = self._conf.get('port', 8888)
         self.start()
 
     def on_stop(self):
@@ -64,3 +63,10 @@ class WSGIServer(threading.Thread):
                 return self._apps[app_route](environ, start_response)
         start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
         return ['no application deployed'.encode('utf-8')]
+
+    @event
+    def on_configuration_changed(self, key, value):
+        if key == 'port' and value != self._port:
+            ctx = self.__context__
+            ctx.stop().add_done_callback(lambda rt, bdl=ctx: bdl.start())
+

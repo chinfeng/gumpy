@@ -50,7 +50,15 @@
 
     $ python -m gumpy
     Gumpy runtime console
-    >>> install console_server
-    >>> start console_server
+    >>> install web_console
+    >>> start web_console
     
 启动后访问 http://localhost:3040 进入 WEB 控制台
+
+## Configuration 配置 ##
+
+每个组件都能够使用配置功能，可使用以下命令修改：
+
+    >>> conf wsgi_serv port 8080
+    
+控制台会在每次修改配置后会触发对应组件的 on_configuration_changed 事件，该组件在改变端口后自动重启服务器。配置获取方式与事件处理代码详见 [wsgi_serv.py](blob/master/plugins/wsgi_serv.py)。
