@@ -208,7 +208,6 @@ class ServiceReference(object):
             self._events = set(filter(
                 lambda obj: isinstance(obj, EventSlot),
                 (getattr(instance, an) for an in dir(instance))))
-            self.__context__.events |= self._events
             self._evt.set()
             self._consumers = set(filter(
                 lambda obj: isinstance(obj, _Consumer),
@@ -223,7 +222,6 @@ class ServiceReference(object):
             if self.provides:
                 self.__framework__.unregister_producer(self)
             self._consumers = None
-            self.__context__.events -= self._events
             self._events = None
             if 'on_stop' in dir(self._instance):
                 self._instance.on_stop()
@@ -333,7 +331,12 @@ class BundleContext(ExecutorHelper):
 
     @property
     def events(self):
-        return self._events
+        if self.state == self.ST_ACTIVE:
+            for sr in self.service_references.values():
+                for e in sr.events: yield e
+        else:
+            raise StopIteration
+
     @events.setter
     def events(self, es):
         self._events = es
