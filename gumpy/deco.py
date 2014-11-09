@@ -109,15 +109,15 @@ class _EventHepler(object):
 
 event = _EventHepler
 
-def configuration(*keys):
+def configuration(**config_map):
     def deco(func):
         def configuration_injected_func(self, *args, **kwds):
             _kwds = kwds.copy()
             config = self.__context__.configuration
-            for key in keys:
+            for p, c in config_map.items():
                 try:
-                    if key in config:
-                        _kwds[key] = config.get(key)
+                    if c in config:
+                        _kwds[p] = config.get(c)
                 except:
                     pass
             return func(self, *args, **_kwds)

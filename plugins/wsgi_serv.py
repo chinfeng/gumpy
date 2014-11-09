@@ -17,7 +17,7 @@ class WSGIServer(threading.Thread):
         self._apps = {}
         self._server = None
 
-    @configuration('port')
+    @configuration(port='port')
     def run(self, port=8888):
         try:
             from tornado.wsgi import WSGIContainer
