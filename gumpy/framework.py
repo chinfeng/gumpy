@@ -72,26 +72,67 @@ class BundleReloadError(RuntimeError):
 class ServiceUnavaliableError(RuntimeError):
     pass
 
-class _ManagerHelper(object):
-    def __init__(self, managed_object, manager_type=None, settings=None):
-        self._settings = settings or {}
-        self._managed_object = managed_object
-        self._manager_type = manager_type
+class Annotation(object):
+    def __init__(self, subject, **metadata):
+        self._nest = None
+        self._subject = subject
+        if isinstance(self._subject, Annotation):
+            subject.nest = self
+        self._metadata = metadata
+    def __call__(self, *args, **kwds):
+        return self._subject(*args, **kwds)
+    def on_duplicated(self, key, values):
+        return key, values
     @property
-    def settings(self):
-        return self._settings
-    @settings.setter
-    def settings(self, sts):
-        self._settings = sts
+    def nest(self):
+        return self._nest
+    @nest.setter
+    def nest(self, nest):
+        self._nest = nest
     @property
-    def manager_type(self):
-        return self._manager_type
-    @manager_type.setter
-    def manager_type(self, tp):
-        self._manager_type = tp
-    def to_managed(self, **kwds):
-        tp = self.manager_type
-        return tp(self._managed_object, **dict(self.settings, **kwds)) if tp else None
+    def root_nest(self):
+        return self.nest.root_nest if self.nest else self
+    @property
+    def subject(self):
+        if isinstance(self._subject, Annotation):
+            return self._subject.subject
+        else:
+            return self._subject
+    @property
+    def metadata(self):
+        data_items = self._other_metadata_items()
+        metadata = {}
+        duplicated_keys = set()
+        for k, v in data_items:
+            if k in metadata:
+                if isinstance(metadata[k], list):
+                    metadata[k].append(v)
+                else:
+                    metadata[k] = [metadata[k], v]
+                duplicated_keys.add(k)
+            else:
+                metadata[k] = v
+        for k in duplicated_keys:
+            metadata[k] = self.on_duplicated(k, metadata[k])[1]
+        return metadata
+
+    def _other_metadata_items(self, subject=None):
+        s = subject or self
+        if isinstance(s, Annotation):
+            for item in s._metadata.items():
+                yield item
+            if isinstance(s._subject, Annotation):
+                for item in self._other_metadata_items(s._subject):
+                    yield item
+
+class ServiceAnnotation(Annotation):
+    def __init__(self, subject, name=None):
+        super(self.__class__, self).__init__(subject, name=name)
+
+    @property
+    def subject(self):
+        metadata = self.root_nest.metadata
+        return ServiceReference(super(self.__class__, self).subject, metadata.get('name'), metadata.get('provides', None))
 
 class _Callable(object):
     def __init__(self, func):
@@ -167,7 +208,14 @@ class ServiceReference(object):
     def __init__(self, cls, name=None, provides=None):
         self._cls = cls
         self._name = name or cls.__name__
-        self._provides = provides or set()
+        if isinstance(provides, list):
+            self._provides = set(provides)
+        elif isinstance(provides, set):
+            self._provides = provides
+        elif provides is not None:
+            self._provides = {provides}
+        else:
+            self._provides = set()
         self._instance = None
         self._evt = threading.Event()
 
@@ -280,16 +328,16 @@ class BundleContext(ExecutorHelper):
 
         for attr_name in dir(self._module):
             attr = getattr(self._module, attr_name)
-            if isinstance(attr, _ManagerHelper):
-                manager = attr.to_managed()
-                if isinstance(manager, Activator):
-                    self._activator = manager
-                elif isinstance(manager, Deactivator):
-                    self._deactivator = manager
-                elif isinstance(manager, ServiceReference):
-                    manager.__context__ = self
-                    manager.__framework__ = self.__framework__
-                    self._service_references[manager.name] = manager
+            if isinstance(attr, Annotation):
+                subject = attr.subject
+                if isinstance(subject, Activator):
+                    self._activator = subject
+                elif isinstance(subject, Deactivator):
+                    self._deactivator = subject
+                elif isinstance(subject, ServiceReference):
+                    subject.__context__ = self
+                    subject.__framework__ = self.__framework__
+                    self._service_references[subject.name] = subject
 
         self._state = self.ST_RESOLVED
 
