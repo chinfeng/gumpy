@@ -41,10 +41,10 @@ class _LocalDocument(object):
         else:
             super(self.__class__, self).__setattr__(key, value)
     def __getattr__(self, key):
-        if key not in dir(self):
-            return self._dict_object[key]
-        else:
+        try:
             return super(self.__class__, self).__getattr__(key)
+        except AttributeError:
+            return self._dict_object[key]
     def __setitem__(self, key, value):
         self.__setattr__(key, value)
     def __getitem__(self, item):
