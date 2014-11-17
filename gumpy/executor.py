@@ -204,8 +204,10 @@ class _GeneralCoroutineFuture(_BaseCoroutineFuture):
         super(self.__class__, self).__init__(executor)
     def result(self, timeout=None):
         while not self._done:
-            while not hasattr(self, '_result'):
-                self._executor.step()
+            self._executor.step()
+        if self._exception:
+            raise self._exception
+        else:
             return getattr(self, '_result')
     def wait(self, timeout=None):
         while not self._done:
