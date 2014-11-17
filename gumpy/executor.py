@@ -5,7 +5,9 @@ try:
     from Queue import Queue
 except ImportError:
     from queue import Queue
+from collections import deque
 import types
+import inspect
 import threading
 
 import logging
@@ -175,7 +177,109 @@ class InlineExecutor(_Executor):
     def wait_until_idle(self):
         return
 
-_default_executor_class = ThreadPoolExecutor
+class _BaseCoroutineFuture(_Future):
+    def __init__(self, executor):
+        self._executor = executor
+        self._done = False
+        self._exception = None
+        self._done_callbacks = []
+    def result(self, timeout=None):
+        return NotImplemented
+    def exception(self, timeout=None):
+        return self._exception
+    @property
+    def done(self):
+        return self._done
+    def add_done_callback(self, fn, *args, **kwds):
+        if self.done:
+            fn(*args, **kwds)
+        else:
+            self._done_callbacks.append((fn, args, kwds))
+    def set_exception(self, exception):
+        self._done = True
+        self._exception = exception
+
+class _GeneralCoroutineFuture(_BaseCoroutineFuture):
+    def __init__(self, executor):
+        super(self.__class__, self).__init__(executor)
+    def result(self, timeout=None):
+        while not self._done:
+            while not hasattr(self, '_result'):
+                self._executor.step()
+            return getattr(self, '_result')
+    def wait(self, timeout=None):
+        while not self._done:
+            self._executor.step()
+    def send_result(self, result):
+        if not self._done:
+            setattr(self, '_result', result)
+            self._done = True
+            for fn, args, kwds in self._done_callbacks:
+                fn(result, *args, **kwds)
+
+class _GeneratorCoroutineFuture(_BaseCoroutineFuture):
+    def __init__(self, executor):
+        super(self.__class__, self).__init__(executor)
+        self._result_list = []
+        self._got = False
+    def result(self, timeout=None):
+        for rt in self._result_list:
+            yield rt
+        while not self._done:
+            self._executor.step()
+            if self._got:
+                self._got = False
+                yield self._result_list[-1]
+    def wait(self, timeout=None):
+        while not self._done:
+            self._executor.step()
+    def send_result(self, result):
+        if not self._done:
+            if type(result) is StopIteration or result is StopIteration:
+                self._done = True
+                for fn, args, kwds in self._done_callbacks:
+                    fn(iter(self._result_list), *args, **kwds)
+            else:
+                self._result_list.append(result)
+                self._got = True
+        else:
+            raise RuntimeError('cannot send result after done.')
+    def __iter__(self):
+        return self.result()
+
+class CoroutineExecutor(_Executor):
+    def __init__(self):
+        self._tasks = deque()
+    def _generator_wrapper(self, fn, args, kwds):
+        yield fn(*args, **kwds)
+    def submit(self, fn, *args, **kwds):
+        if inspect.isgeneratorfunction(fn):
+            f = _GeneratorCoroutineFuture(self)
+            self._tasks.append((fn(*args, **kwds), f))
+            return f
+        else:
+            f = _GeneralCoroutineFuture(self)
+            self._tasks.append((self._generator_wrapper(fn, args, kwds), f))
+            return f
+    def exclusive_submit(self, func, *args, **kwds):
+        return self.submit(func, *args, **kwds)
+    def step(self):
+        try:
+            gen, f = self._tasks.popleft()
+        except IndexError:
+            return
+        try:
+            f.send_result(next(gen))
+            self._tasks.append((gen, f))
+        except StopIteration:
+            f.send_result(StopIteration)
+        except BaseException as err:
+            f.set_exception(err)
+    def wait_until_idle(self):
+        while self._tasks:
+            self.step()
+
+_default_executor_class = CoroutineExecutor
 
 class ExecutorHelper(object):
     def __init__(self, executor=_default_executor_class()):
@@ -206,4 +310,3 @@ def exclusive(func):
         else:
             return func
     return _exclusive_callable
-
