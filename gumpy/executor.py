@@ -254,25 +254,30 @@ class CoroutineExecutor(_Executor):
         self._tasks = deque()
     def _generator_wrapper(self, fn, args, kwds):
         yield fn(*args, **kwds)
-    def submit(self, fn, *args, **kwds):
+    def _submit(self, fn, exclusive, args, kwds):
         if inspect.isgeneratorfunction(fn):
             f = _GeneratorCoroutineFuture(self)
-            self._tasks.append((fn(*args, **kwds), f))
+            self._tasks.append((fn(*args, **kwds), f, exclusive))
             return f
         else:
             f = _GeneralCoroutineFuture(self)
-            self._tasks.append((self._generator_wrapper(fn, args, kwds), f))
+            self._tasks.append((self._generator_wrapper(fn, args, kwds), f, exclusive))
             return f
-    def exclusive_submit(self, func, *args, **kwds):
-        return self.submit(func, *args, **kwds)
+    def submit(self, fn, *args, **kwds):
+        return self._submit(fn, False, args, kwds)
+    def exclusive_submit(self, fn, *args, **kwds):
+        return self._submit(fn, True, args, kwds)
     def step(self):
         try:
-            gen, f = self._tasks.popleft()
+            gen, f, exclusive = self._tasks.popleft()
         except IndexError:
             return
         try:
             f.send_result(next(gen))
-            self._tasks.append((gen, f))
+            if exclusive:
+                self._tasks.appendleft((gen, f, exclusive))
+            else:
+                self._tasks.append((gen, f, exclusive))
         except StopIteration:
             f.send_result(StopIteration)
         except BaseException as err:
