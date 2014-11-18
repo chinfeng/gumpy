@@ -6,6 +6,8 @@ try:
 except ImportError:
     from queue import Queue
 from collections import deque
+import weakref
+import contextlib
 import types
 import inspect
 import threading
@@ -25,6 +27,10 @@ class _Executor(object):
 
     def wait_until_idle(self):
         raise NotImplementedError
+
+    @contextlib.contextmanager
+    def lock(self):
+        yield
 
 class _Future(object):
     def result(self, timeout=None):
@@ -94,6 +100,7 @@ class ThreadPoolExecutor(_Executor):
         super(self.__class__, self).__init__()
         self._worker_queue = Queue()
         self._dispatch_queue = Queue()
+        self._lock = None
         for i in range(worker_size):
             t = threading.Thread(target=self._worker)
             t.setDaemon(True)
@@ -134,6 +141,11 @@ class ThreadPoolExecutor(_Executor):
 
     def wait_until_idle(self):
         self._worker_queue.join()
+
+    def lock(self):
+        if not self._lock:
+            self._lock = threading.Lock()
+        return self._lock
 
 class _InlineFuture(_Future):
     def __init__(self, func, args, kwds):

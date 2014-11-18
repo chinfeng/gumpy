@@ -456,7 +456,7 @@ class Framework(ExecutorHelper):
             consumer(producer)
 
     def register_consumers(self, consumers):
-        with self._lock:
+        with self.__executor__.lock():
             c1, c2 = itertools.tee(consumers)
             binders = set(filter(lambda x: isinstance(x, Binder), c1))
             unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
@@ -466,7 +466,7 @@ class Framework(ExecutorHelper):
         self._consume(work_list)
 
     def unregister_consumers(self, consumers):
-        with self._lock:
+        with self.__executor__.lock():
             c1, c2 = itertools.tee(consumers)
             binders = set(filter(lambda x: isinstance(x, Binder), c1))
             unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
@@ -476,13 +476,13 @@ class Framework(ExecutorHelper):
         self._consume(work_list)
 
     def register_producer(self, reference):
-        with self._lock:
+        with self.__executor__.lock():
             work_list = [(binder, reference) for binder in self._binders]
             self._producers.add(reference)
         self._consume(work_list)
 
     def unregister_producer(self, reference):
-        with self._lock:
+        with self.__executor__.lock():
             work_list = [(unbinder, reference) for unbinder in self._unbinders]
             self._producers.remove(reference)
         self._consume(work_list)
