@@ -7,6 +7,7 @@ import os
 import threading
 import json
 import argparse
+import mimetypes
 
 try:
     from urlparse import urlparse
@@ -15,14 +16,6 @@ except ImportError:
 
 import logging
 logger = logging.getLogger(__name__)
-
-_MIME_TABLE = {
-    '.txt': 'text/plain',
-    '.html': 'text/html',
-    '.htm': 'text/html',
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-}
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-p', '--path',
@@ -83,11 +76,11 @@ class WSGIApplication(object):
                 with open(abs_path, 'rb') as fd:
                     for chunk in FileWrapper(fd):
                         yield chunk
-            elif ext in _MIME_TABLE:
-                headers = [('content-type', _MIME_TABLE[ext])]
-                start_response('200 OK', headers)
+            elif ext in mimetypes.types_map:
                 abs_path = os.path.dirname(__file__) + path.replace('/', os.path.sep)
                 with open(abs_path, 'rb') as fd:
+                    headers = [('content-type', mimetypes.types_map[ext])]
+                    start_response('200 OK', headers)
                     for chunk in FileWrapper(fd):
                         yield chunk
             else:
@@ -117,9 +110,12 @@ class WSGIApplication(object):
                 self._framework.wait_until_idle()
                 start_response('200 OK', [('Content-type', 'application/json'), ])
                 yield json.dumps(rt, indent=4).encode('utf-8')
+        except FileNotFoundError:
+            start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
+            yield '404: Not Found'.encode('utf-8')
         except BaseException as err:
             start_response('500 INTERNAL SERVER ERROR', [('Content-type', 'text/plain'), ])
-            yield err.args[0]
+            yield err.args[0].encode('utf-8')
 
 @service
 class WebConsoleServer(threading.Thread):
