@@ -12,11 +12,154 @@ try:
     import ConfigParser as configparser
 except ImportError:
     import configparser
-from .executor import ExecutorHelper, async
 from .configuration import LocalConfiguration
+
+from inspect import isgeneratorfunction
+import types
 
 import logging
 logger = logging.getLogger(__name__)
+
+class _BaseFuture(object):
+    def __init__(self, executor):
+        self._executor = executor
+        self._done = False
+        self._exception = None
+        self._done_callbacks = []
+    def result(self):
+        raise NotImplementedError
+    def exception(self):
+        return self._exception
+    def wait(self):
+        raise NotImplementedError
+    def is_done(self):
+        return self._done
+    def add_done_callback(self, fn, *args, **kwds):
+        raise NotImplementedError
+    def set_exception(self, exception):
+        self._done = True
+        self._exception = exception
+
+class _GeneralFuture(_BaseFuture):
+    def __init__(self, executor):
+        super(self.__class__, self).__init__(executor)
+        self._result = None
+    def result(self):
+        while not self._done:
+            self._executor.step()
+        if self._exception:
+            raise self._exception
+        else:
+            return self._result
+    def wait(self):
+        while not self._done:
+            self._executor.step()
+    def send_result(self, result):
+        if not self._done:
+            self._result = result
+            self._done = True
+            for fn, args, kwds in self._done_callbacks:
+                self._executor.submit(fn, result, *args, **kwds)
+    def add_done_callback(self, fn, *args, **kwds):
+        if self.is_done():
+            self._executor.submit(fn, self._result, *args, **kwds)
+        else:
+            self._done_callbacks.append((fn, args, kwds))
+
+class _GeneratorFuture(_BaseFuture):
+    def __init__(self, executor):
+        super(self.__class__, self).__init__(executor)
+        self._result_list = []
+        self._got = False
+    def result(self):
+        for rt in self._result_list:
+            yield rt
+        while not self._done:
+            self._executor.step()
+            if self._got:
+                self._got = False
+                yield self._result_list[-1]
+    def wait(self):
+        while not self._done:
+            self._executor.step()
+    def send_result(self, result):
+        if not self._done:
+            if type(result) is StopIteration or result is StopIteration:
+                self._done = True
+                for fn, args, kwds in self._done_callbacks:
+                    self._executor.submit(fn, self._result_list, *args, **kwds)
+            else:
+                self._result_list.append(result)
+                self._got = True
+        else:
+            raise RuntimeError('cannot send result after done.')
+    def __iter__(self):
+        return self.result()
+    def add_done_callback(self, fn, *args, **kwds):
+        if self.is_done():
+            self._executor.submit(fn, self._result_list, *args, **kwds)
+        else:
+            self._done_callbacks.append((fn, args, kwds))
+
+class _Executor(object):
+    def __init__(self):
+        self._tasks = collections.deque()
+    def _generator_wrapper(self, fn, args, kwds):
+        yield fn(*args, **kwds)
+    def _submit(self, fn, exclusive, args, kwds):
+        if isgeneratorfunction(fn):
+            f = _GeneratorFuture(self)
+            self._tasks.append((fn(*args, **kwds), f, exclusive))
+        else:
+            f = _GeneralFuture(self)
+            self._tasks.append((self._generator_wrapper(fn, args, kwds), f, exclusive))
+        return f
+    def submit(self, fn, *args, **kwds):
+        return self._submit(fn, False, args, kwds)
+    def exclusive_submit(self, fn, *args, **kwds):
+        return self._submit(fn, True, args, kwds)
+    def step(self):
+        try:
+            gen, f, exclusive = self._tasks.popleft()
+        except IndexError:
+            return
+        try:
+            f.send_result(next(gen))
+            if exclusive:
+                self._tasks.appendleft((gen, f, exclusive))
+            else:
+                self._tasks.append((gen, f, exclusive))
+        except StopIteration:
+            f.send_result(StopIteration)
+        except BaseException as err:
+            f.set_exception(err)
+    def wait_until_idle(self):
+        while not self._tasks:
+            self.step()
+    def is_idle(self):
+        return not bool(self._tasks)
+
+# class _ExecutorHelper(object):
+#     def __init__(self, executor=None):
+#         self._executor = executor or _Executor()
+#     @property
+#     def __executor__(self):
+#         return self._executor
+#     @__executor__.setter
+#     def __executor__(self, executor):
+#         self._executor = executor
+#     def wait_until_idle(self):
+#         self._executor.wait_until_idle()
+#
+
+def async(func):
+    def _async_callable(instance, *args, **kwargs):
+        if hasattr(instance, '__executor__'):
+            method = types.MethodType(func, instance)
+            return instance.__executor__.submit(method, *args, **kwargs)
+        else:
+            return func
+    return _async_callable
 
 _immutable_prop = lambda v: property(lambda self, value=v: value)
 _uri_class = collections.namedtuple('GumURI', ('host', 'port', 'bundle', 'service'))
@@ -81,8 +224,6 @@ class Annotation(object):
         self._metadata = metadata
     def __call__(self, *args, **kwds):
         return self._subject(*args, **kwds)
-    def on_duplicated(self, key, values):
-        return key, values
     @property
     def nest(self):
         return self._nest
@@ -102,18 +243,14 @@ class Annotation(object):
     def metadata(self):
         data_items = self._other_metadata_items()
         metadata = {}
-        duplicated_keys = set()
         for k, v in data_items:
             if k in metadata:
                 if isinstance(metadata[k], list):
                     metadata[k].append(v)
                 else:
                     metadata[k] = [metadata[k], v]
-                duplicated_keys.add(k)
             else:
                 metadata[k] = v
-        for k in duplicated_keys:
-            metadata[k] = self.on_duplicated(k, metadata[k])[1]
         return metadata
 
     def _other_metadata_items(self, subject=None):
@@ -150,6 +287,18 @@ class Activator(_Callable):
 class Deactivator(_Callable):
     def __init__(self, func):
         super(self.__class__, self).__init__(func)
+
+class Task(object):
+    def __init__(self, fn, instance):
+        self._fn = fn
+        self._instance = instance
+    def __call__(self, *args, **kwds):
+        method = types.MethodType(self._fn, self._instance)
+        return method(*args, **kwds)
+    def start(self, *args, **kwds):
+        if hasattr(self._instance, '__executor__'):
+            method = types.MethodType(self._fn, self._instance)
+            return self._instance.__executor__.submit(method, *args, **kwds)
 
 class _Consumer(object):
     def __init__(self, instance, func, resource_uri):
@@ -217,7 +366,6 @@ class ServiceReference(object):
         else:
             self._provides = set()
         self._instance = None
-        self._evt = threading.Event()
 
         self.__context__ = None
         self.__framework__ = None
@@ -256,7 +404,6 @@ class ServiceReference(object):
             self._events = set(filter(
                 lambda obj: isinstance(obj, EventSlot),
                 (getattr(instance, an) for an in dir(instance))))
-            self._evt.set()
             self._consumers = set(filter(
                 lambda obj: isinstance(obj, _Consumer),
                 (getattr(instance, an) for an in dir(instance))))
@@ -275,15 +422,16 @@ class ServiceReference(object):
                 self._instance.on_stop()
             del self._instance
             self._instance = None
-            self._evt.clear()
 
-    def get_service(self, timeout=None):
-        if self._evt.wait(timeout):
+    def get_service(self):
+        if self._instance:
             return self._instance
         else:
+            # TODO
+            # 处理 future ?
             raise ServiceUnavaliableError('{0}:{1}'.format(self.__context__.name, self._name))
 
-class BundleContext(ExecutorHelper):
+class BundleContext(object):
     ST_INSTALLED = _immutable_prop((0, 'INSTALLED'))
     ST_RESOLVED = _immutable_prop((1, 'RESOLVED'))
     ST_STARTING = _immutable_prop((2, 'STARTING'))
@@ -293,7 +441,7 @@ class BundleContext(ExecutorHelper):
     ST_UNSATISFIED = _immutable_prop((6, 'ST_UNSATISFIED'))
 
     def __init__(self, framework, uri):
-        ExecutorHelper.__init__(self, framework.__executor__)
+        self.__executor__ = framework.__executor__
         self._framework = framework
         self._uri = uri
         self._state = self.ST_INSTALLED
@@ -428,9 +576,9 @@ class BundleContext(ExecutorHelper):
         else:
             return None
 
-    def get_service(self, uri, timeout=None):
+    def get_service(self, uri):
         sr = self.get_service_reference(uri)
-        return sr.get_service(timeout) if sr else None
+        return sr.get_service() if sr else None
 
     def get(self, uri):
         u = service_uri(uri)
@@ -439,9 +587,9 @@ class BundleContext(ExecutorHelper):
         else:
             return self.__framework__.bundles[u.bundle]
 
-class Framework(ExecutorHelper):
+class Framework(object):
     def __init__(self, configuration=None):
-        ExecutorHelper.__init__(self)
+        self.__executor__ = _Executor()
         self._bundles = {}
         self._lock = threading.Lock()
         self._binders = set()
@@ -456,35 +604,31 @@ class Framework(ExecutorHelper):
             consumer(producer)
 
     def register_consumers(self, consumers):
-        with self.__executor__.lock():
-            c1, c2 = itertools.tee(consumers)
-            binders = set(filter(lambda x: isinstance(x, Binder), c1))
-            unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
-            self._binders |= binders
-            self._unbinders |= unbinders
-            work_list = list(itertools.product(binders, self._producers))
+        c1, c2 = itertools.tee(consumers)
+        binders = set(filter(lambda x: isinstance(x, Binder), c1))
+        unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
+        self._binders |= binders
+        self._unbinders |= unbinders
+        work_list = list(itertools.product(binders, self._producers))
         self._consume(work_list)
 
     def unregister_consumers(self, consumers):
-        with self.__executor__.lock():
-            c1, c2 = itertools.tee(consumers)
-            binders = set(filter(lambda x: isinstance(x, Binder), c1))
-            unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
-            self._binders -= binders
-            self._unbinders -= unbinders
-            work_list = list(itertools.product(unbinders, self._producers))
+        c1, c2 = itertools.tee(consumers)
+        binders = set(filter(lambda x: isinstance(x, Binder), c1))
+        unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
+        self._binders -= binders
+        self._unbinders -= unbinders
+        work_list = list(itertools.product(unbinders, self._producers))
         self._consume(work_list)
 
     def register_producer(self, reference):
-        with self.__executor__.lock():
-            work_list = [(binder, reference) for binder in self._binders]
-            self._producers.add(reference)
+        work_list = [(binder, reference) for binder in self._binders]
+        self._producers.add(reference)
         self._consume(work_list)
 
     def unregister_producer(self, reference):
-        with self.__executor__.lock():
-            work_list = [(unbinder, reference) for unbinder in self._unbinders]
-            self._producers.remove(reference)
+        work_list = [(unbinder, reference) for unbinder in self._unbinders]
+        self._producers.remove(reference)
         self._consume(work_list)
 
     @property
@@ -528,9 +672,9 @@ class Framework(ExecutorHelper):
         else:
             return None
 
-    def get_service(self, name, timeout=None):
+    def get_service(self, name):
         service = self.get_service_reference(name)
-        return service.get_service(timeout) if service else None
+        return service.get_service() if service else None
 
     def get(self, uri):
         u = service_uri(uri, _BUNDLE_LEVEL)
@@ -548,7 +692,7 @@ class Framework(ExecutorHelper):
                 else:
                     bdl = uri_dict[uri]
                 if start:
-                    bdl.start().result()
+                    bdl.start().wait()
             except BaseException as e:
                 logger.error('bundle {0} init error:'.format(uri))
                 logger.exception(e)
@@ -557,6 +701,9 @@ class Framework(ExecutorHelper):
         for bdl in self.bundles.values():
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
         self._state_conf.persist()
+
+    def wait_until_idle(self):
+        return self.__executor__.wait_until_idle()
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

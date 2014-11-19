@@ -4,7 +4,7 @@ __author__ = 'chinfeng'
 import functools
 
 from .framework import (
-    Binder, Unbinder, Annotation, ServiceAnnotation,
+    Binder, Unbinder, Annotation, ServiceAnnotation, Task,
     EventSlot, Activator, Deactivator, ServiceUnavaliableError)
 
 def require(*service_names, **service_dict):
@@ -12,15 +12,14 @@ def require(*service_names, **service_dict):
         def injected_func(self, *args, **kwds):
             _args = list(args)
             _kwds = kwds.copy()
-            timeout = _kwds.get('__timeout__', None)
             for sn in service_names:
                 try:
-                    _args.append(self.__context__.get_service(sn, timeout))
+                    _args.append(self.__context__.get_service(sn))
                 except ServiceUnavaliableError:
                     _args.append(None)
             for k, v in service_dict.items():
                 try:
-                    _kwds[k] = self.__context__.get_service(v, timeout)
+                    _kwds[k] = self.__context__.get_service(v)
                 except ServiceUnavaliableError:
                     _kwds[k] = None
             return func(self, *_args, **_kwds)
@@ -88,3 +87,12 @@ class deactivate(Annotation):
 
 provide = lambda provides: functools.partial(Annotation, provides=provides)
 service = lambda name: ServiceAnnotation(name) if not isinstance(name, str) else functools.partial(ServiceAnnotation, name=name)
+
+class _TaskHelper(object):
+    def __init__(self, fn):
+        self._fn = fn
+    def __get__(self, instance, owner):
+        if instance:
+            return Task(self._fn, instance)
+        else:
+            raise TypeError('Service instance is needed for a task')
