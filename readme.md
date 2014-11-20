@@ -71,28 +71,41 @@
 2. 在任务的循环最底层，使用 yield 确保调度切换
 3. 在构造函数或者 on_start 中启动协程
 
-简易命令如下：
+加载示例组件：
 
     >>> install task_demo
           # 安装 task_demo
     >>> start task_demo
           # 启动 task_demo
+          
+触发 [message_task](plugins/task_demo.py#L16) 调度：
+
     >>> fireall on_message hello
           # 触发 on_message 事件，参数为 hello
     >>> step
           # 推进协程调度器，空行回车也执行该命令
           # 命令格式 step [n]，步长 n 默认为 1
     TaskDemo on_message: hello
-          # 触发 [message_task](plugins/task_demo.py#L16) 调度
+    
+          
+触发 [counter_task](plugins/task_demo.py#L24) 调度：
+
     >>> step
     TaskDemo counter: 0
-          # 触发 [counter_task](plugins/task_demo.py#L24) 调度
-    >>> fire task_demo on_message world    
+    
+    
+注意 step 一次只推进一个任务，多任务的场景下可能无法切确知道 step 何时触发：
+
+    >>> fire task_demo on_message world
           # 触发 task_demo 组件的 on_message 事件，参数为 hello
     >>> step
-    TaskDemo on_message: world
     >>> step
+    TaskDemo on_message: world
+    >>> step 10
     TaskDemo counter: 1
-          # 注意 step 一次只执行一个任务，可能需要 step 多次才有输出
+    TaskDemo counter: 2
+    TaskDemo counter: 3
+    TaskDemo counter: 4
+    TaskDemo counter: 5
 
 协程属于被动式推动机制，如需独立于容器进行主动式调度，可直接在组件中使用线程，详见 [wsgi_serv.py](plugins/wsgi_serv.py)。
