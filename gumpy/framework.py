@@ -306,7 +306,7 @@ class _Consumer(object):
         self._func = func
         self._resource_uri = resource_uri
     def __call__(self, resource_reference):
-        if self.match(resource_reference):
+        if self.match(resource_reference) and (self._instance is not resource_reference):
             return self._func(self._instance, resource_reference.get_service())
     def match(self, reference):
         return self.resource_uri in reference.provides
