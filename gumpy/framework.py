@@ -143,19 +143,6 @@ class _Executor(object):
     def is_idle(self):
         return not bool(self._tasks)
 
-# class _ExecutorHelper(object):
-#     def __init__(self, executor=None):
-#         self._executor = executor or _Executor()
-#     @property
-#     def __executor__(self):
-#         return self._executor
-#     @__executor__.setter
-#     def __executor__(self, executor):
-#         self._executor = executor
-#     def wait_until_idle(self):
-#         self._executor.wait_until_idle()
-#
-
 def async(func):
     def _async_callable(instance, *args, **kwargs):
         if hasattr(instance, '__executor__'):
@@ -351,7 +338,7 @@ class _EventManager(object):
 
     def __getattr__(self, key):
         return _EventProxy(
-            (e for e in (self._owner.events or set()) if e.name == key)
+            (e for e in (self._owner.events() or set()) if e.name == key)
         )
 
     def __getitem__(self, item):
@@ -396,6 +383,10 @@ class ServiceReference(object):
     def events(self):
         return self._events
 
+    @property
+    def is_avaliable(self):
+        return bool(self._instance)
+
     def start(self):
         if not self._instance:
             instance = self._cls()
@@ -411,15 +402,24 @@ class ServiceReference(object):
             self._consumers = set(filter(
                 lambda obj: isinstance(obj, _Consumer),
                 (getattr(instance, an) for an in dir(instance))))
-            self.__framework__.register_consumers(self._consumers)
-            if self.provides:
-                self.__framework__.register_producer(self)
+
+            # bind all producers
+            binders = { c for c in self._consumers if isinstance(c, Binder) }
+            for p in self.__framework__.producers():
+                for c in binders:
+                    c(p)
+
+            # produce for all binders
+            if self._provides:
+                for c in self.__framework__.binders():
+                    c(self)
 
     def stop(self):
         if self._instance:
-            self.__framework__.unregister_consumers(self._consumers)
-            if self.provides:
-                self.__framework__.unregister_producer(self)
+            # produce for all unbinders
+            if self._provides:
+                for c in self.__framework__.unbinders():
+                    c(self)
             self._consumers = None
             self._events = None
             if 'on_stop' in dir(self._instance):
@@ -432,7 +432,6 @@ class ServiceReference(object):
             return self._instance
         else:
             # TODO
-            # 处理 future ?
             raise ServiceUnavaliableError('{0}:{1}'.format(self.__context__.name, self._name))
 
 class BundleContext(object):
@@ -532,17 +531,12 @@ class BundleContext(object):
     def em(self):
         return self._event_manager
 
-    @property
     def events(self):
         if self.state == self.ST_ACTIVE:
             for sr in self.service_references.values():
                 for e in sr.events: yield e
         else:
             raise StopIteration
-
-    @events.setter
-    def events(self, es):
-        self._events = es
 
     @async
     def start(self):
@@ -610,34 +604,6 @@ class Framework(object):
         for consumer, producer in work_list:
             consumer(producer)
 
-    def register_consumers(self, consumers):
-        c1, c2 = itertools.tee(consumers)
-        binders = set(filter(lambda x: isinstance(x, Binder), c1))
-        unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
-        self._binders |= binders
-        self._unbinders |= unbinders
-        work_list = list(itertools.product(binders, self._producers))
-        self._consume(work_list)
-
-    def unregister_consumers(self, consumers):
-        c1, c2 = itertools.tee(consumers)
-        binders = set(filter(lambda x: isinstance(x, Binder), c1))
-        unbinders = set(filter(lambda x: isinstance(x, Unbinder), c2))
-        self._binders -= binders
-        self._unbinders -= unbinders
-        work_list = list(itertools.product(unbinders, self._producers))
-        self._consume(work_list)
-
-    def register_producer(self, reference):
-        work_list = [(binder, reference) for binder in self._binders]
-        self._producers.add(reference)
-        self._consume(work_list)
-
-    def unregister_producer(self, reference):
-        work_list = [(unbinder, reference) for unbinder in self._unbinders]
-        self._producers.remove(reference)
-        self._consume(work_list)
-
     @property
     def bundles(self):
         return self._bundles
@@ -646,10 +612,9 @@ class Framework(object):
     def configuration(self):
         return self._configuration
 
-    @property
     def events(self):
         for bdl in self.bundles.values():
-            for e in bdl.events:
+            for e in bdl.events():
                 yield e
 
     @property
@@ -659,6 +624,24 @@ class Framework(object):
     @property
     def em(self):
         return self._event_manager
+
+    def producers(self):
+        for bdl in self._bundles.values():
+            for sr in bdl.service_references.values():
+                if sr.is_avaliable and sr.provides: yield sr
+
+    def consumers(self):
+        for bdl in self._bundles.values():
+            for sr in bdl.service_references.values():
+                if sr.is_avaliable:
+                    for c in sr.consumers:
+                        yield c
+
+    def binders(self):
+        return filter(lambda c: isinstance(c, Binder), self.consumers())
+
+    def unbinders(self):
+        return filter(lambda c: isinstance(c, Unbinder), self.consumers())
 
     def get_bundle(self, uri, default=None):
         return self._bundles.get(uri, default)
