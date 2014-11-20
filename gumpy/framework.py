@@ -260,7 +260,16 @@ class ServiceAnnotation(Annotation):
     @property
     def subject(self):
         metadata = self.root_nest.metadata
-        return ServiceReference(super(self.__class__, self).subject, metadata.get('name'), metadata.get('provides', None))
+        return ServiceReferenceFactory(super(self.__class__, self).subject, metadata.get('name'), metadata.get('provides', None))
+
+class ServiceReferenceFactory(object):
+    def __init__(self, cls, name=None, provides=None):
+        self._cls = cls
+        self._name = name
+        self._provides = provides
+    def create(self, bundle):
+        return ServiceReference(bundle, self._cls, self._name, self._provides)
+
 
 class _Callable(object):
     def __init__(self, func):
@@ -345,7 +354,12 @@ class _EventManager(object):
         return self.__getattr__(item)
 
 class ServiceReference(object):
-    def __init__(self, cls, name=None, provides=None):
+    def __init__(self, bundle, cls, name=None, provides=None):
+        self.__context__ = bundle
+        cls.__context__ = bundle
+        cls.__framework__ = bundle.__framework__
+        cls.__executor__ = bundle.__framework__.__executor__
+        cls.__reference__ = self
         self._cls = cls
         self._name = name or cls.__name__
         if isinstance(provides, list):
@@ -358,8 +372,6 @@ class ServiceReference(object):
             self._provides = set()
         self._instance = None
 
-        self.__context__ = None
-        self.__framework__ = None
         self._consumers = None
         self._events = None
 
@@ -387,12 +399,17 @@ class ServiceReference(object):
     def is_avaliable(self):
         return bool(self._instance)
 
+    @property
+    def __framework__(self):
+        return self.__context__.__framework__
+
+    @property
+    def __executor__(self):
+        return self.__context__.__framework__.__executor__
+
     def start(self):
         if not self._instance:
             instance = self._cls()
-            instance.__context__ = self.__context__
-            instance.__framework__ = self.__framework__
-            instance.__reference__ = self
             if 'on_start' in dir(instance):
                 instance.on_start()
             self._instance = instance
@@ -444,7 +461,6 @@ class BundleContext(object):
     ST_UNSATISFIED = _immutable_prop((6, 'ST_UNSATISFIED'))
 
     def __init__(self, framework, uri):
-        self.__executor__ = framework.__executor__
         self._framework = framework
         self._uri = uri
         self._state = self.ST_INSTALLED
@@ -488,12 +504,15 @@ class BundleContext(object):
                     self._activator = subject
                 elif isinstance(subject, Deactivator):
                     self._deactivator = subject
-                elif isinstance(subject, ServiceReference):
-                    subject.__context__ = self
-                    subject.__framework__ = self.__framework__
-                    self._service_references[subject.name] = subject
+                elif isinstance(subject, ServiceReferenceFactory):
+                    sr = subject.create(self)
+                    self._service_references[sr.name] = sr
 
         self._state = self.ST_RESOLVED
+
+    @property
+    def __executor__(self):
+        return self._framework.__executor__
 
     @property
     def path(self):
@@ -694,6 +713,9 @@ class Framework(object):
 
     def wait_until_idle(self):
         return self.__executor__.wait_until_idle()
+
+    def step(self):
+        self.__executor__.step()
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

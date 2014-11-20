@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 __author__ = 'chinfeng'
 
-import sys
 import os
+import traceback
 from cmd import Cmd
-from . import LocalConfiguration
 
 try:
     import ConfigParser as configparser
@@ -74,8 +73,8 @@ class GumCmd(Cmd):
             if not async:
                 f.result()
             self._save_config()
-        except BaseException as e:
-            print(e)
+        except BaseException:
+            print(traceback.format_exc())
 
     def do_list(self, line):
         for bdl in self._framework.bundles.values():
@@ -123,16 +122,44 @@ class GumCmd(Cmd):
             print('bundle not found')
 
     def do_call(self, line):
-        service_uri, call_caluse = line.split('.', 1)
-        print(eval('self._framework.get_service(\'{0}\').{1}'.format(service_uri, call_caluse)))
+        try:
+            service_uri, call_caluse = line.split('.', 1)
+            print(eval('self._framework.get_service(\'{0}\').{1}'.format(service_uri, call_caluse)))
+        except BaseException:
+            print(traceback.format_exc())
 
     def do_conf(self, line):
-        bn, key, value = line.split(' ')
-        conf = self._framework.configuration[bn]
-        val = value if not value.isdigit() else int(value)
-        conf[key] = val
-        evt = self._framework.bundles[bn].em.on_configuration_changed
-        evt.send(key, val)
-        conf.persist()
+        try:
+            bn, key, value = line.split(' ')
+            conf = self._framework.configuration[bn]
+            val = value if not value.isdigit() else int(value)
+            conf[key] = val
+            evt = self._framework.bundles[bn].em.on_configuration_changed
+            evt.send(key, val)
+            conf.persist()
+        except BaseException:
+            print(traceback.format_exc())
 
+    def do_fireall(self, line):
+        try:
+            evt, values = line.split(' ', 1)
+            evt = self._framework.em[evt]
+            evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
+        except BaseException:
+            print(traceback.format_exc())
 
+    def do_fire(self, line):
+        try:
+            bn, evt, values = line.split(' ', 2)
+            evt = self._framework.bundles[bn].em[evt]
+            evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
+        except BaseException:
+            print(traceback.format_exc())
+
+    def do_step(self, line):
+        n = int(line) if line.isdigit() else 1
+        for i in range(n):
+            self._framework.step()
+
+    def emptyline(self):
+        self._framework.step()

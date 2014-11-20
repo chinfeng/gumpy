@@ -23,30 +23,30 @@
     Gumpy runtime console
     >>> repo
       mod_bdl        [MOD]
-          - MOD 为 python 模块的组件                         
+          # MOD 为 python 模块的组件                         
       pkg_bdl        [PKG]
-          - PKG 为 python 的包组件     
+          # PKG 为 python 的包组件     
       zip_bdl.zip    [ZIP]
-          - ZIP 为 zip 包，内部必须含一个完整同名的 python 包结构
+          # ZIP 为 zip 包，内部必须含一个完整同名的 python 包结构
       file_bdl       [MOD]
     >>> install mod_bdl
-          - 安装 mod_bdl
+          # 安装 mod_bdl
     >>> install file_bdl
-          - 安装 file_bdl
+          # 安装 file_bdl
     >>> start mod_bdl
-          - 启动 mod_bdl
+          # 启动 mod_bdl
     >>> start file_bdl
-          - 启动 file_bdl
+          # 启动 file_bdl
     >>> list
       file_bdl       [ACTIVE]       
       mod_bdl        [ACTIVE]
     >>> call file_bdl:SampleServiceA.foo()
-          - 调用 file_bdl 组件中的 SampleServiceA 服务中的 foo 办法
+          # 调用 file_bdl 组件中的 SampleServiceA 服务中的 foo 办法
     <mod_bdl.SampleServiceA object at 0x7f1210ddec90>
     
 ## Web console ##
 
-内置简单的网页管理组件，plugins/console_server 组件，请输入下面指令启动：
+内置简单的网页管理组件，plugins/web_console 组件，请输入下面指令启动：
 
     $ python -m gumpy
     Gumpy runtime console
@@ -62,3 +62,37 @@
     >>> conf wsgi_serv port 8080
     
 控制台会在每次修改配置后会触发对应组件的 on_configuration_changed 事件，该组件在改变端口后自动重启服务器。配置获取方式与事件处理代码详见 [wsgi_serv.py](plugins/wsgi_serv.py)。
+
+## 协程任务 ##
+
+协程任务代码示例详见[task_demo.py](plugins/task_demo.py)。其中要点：
+
+1. 使用 task 装饰器定义协程任务
+2. 在任务的循环最底层，使用 yield 确保调度切换
+3. 在构造函数或者 on_start 中启动协程
+
+简易命令如下：
+
+    >>> install task_demo
+          # 安装 task_demo
+    >>> start task_demo
+          # 启动 task_demo
+    >>> fireall on_message hello
+          # 触发 on_message 事件，参数为 hello
+    >>> step
+          # 推进协程调度器，空行回车也执行该命令
+          # 命令格式 step [n]，步长 n 默认为 1
+    TaskDemo on_message: hello
+          # 触发 [message_task](plugins/task_demo.py#L16) 调度
+    >>> step
+    TaskDemo counter: 0
+          # 触发 [counter_task](plugins/task_demo.py#L24) 调度
+    >>> fire task_demo on_message world    
+          # 触发 task_demo 组件的 on_message 事件，参数为 hello
+    >>> step
+    TaskDemo on_message: world
+    >>> step
+    TaskDemo counter: 1
+          # 注意 step 一次只执行一个任务，可能需要 step 多次才有输出
+
+协程属于被动式推动机制，如需独立于容器进行主动式调度，可直接在组件中使用线程，详见 [wsgi_serv.py](plugins/wsgi_serv.py)。

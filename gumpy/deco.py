@@ -64,7 +64,7 @@ def configuration(**config_map):
     def deco(func):
         def configuration_injected_func(self, *args, **kwds):
             _kwds = kwds.copy()
-            config = self.__context__.configuration
+            config = self.__reference__.__context__.configuration
             for p, c in config_map.items():
                 try:
                     if c in config:
@@ -96,3 +96,5 @@ class _TaskHelper(object):
             return Task(self._fn, instance)
         else:
             raise TypeError('Service instance is needed for a task')
+
+task = _TaskHelper
