@@ -35,6 +35,28 @@ class ThreadPoolWSGIServer(WSGIServer):
         super(self.__class__, self).shutdown()
         self._pool.terminate()
 
+class TaskPoolWSGIServer(WSGIServer):
+    def __init__(self, executor, *args, **kwds):
+        super(self.__class__, self).__init__(*args, **kwds)
+        self._executor = executor
+
+    def process_request_thread(self, request, client_address):
+        try:
+            self.finish_request(request, client_address)
+            self.shutdown_request(request)
+        except:
+            self.handle_error(request, client_address)
+            self.shutdown_request(request)
+
+    def process_request(self, request, client_address):
+        self._executor.submit(self.process_request_thread, request, client_address)
+
+    def serve_forever(self, *args):
+        from threading import Thread
+        t = Thread(target=super(self.__class__, self).serve_forever)
+        t.setDaemon(True)
+        t.start()
+
 @service
 class WSGIServer(object):
     def __init__(self):
@@ -45,9 +67,15 @@ class WSGIServer(object):
         try:
             self._conf = self.__context__.configuration
             self._port = self._conf.get('port', 8000)
+            self._mode = self._conf.get('mode', 'coroutine')
 
             from wsgiref.simple_server import make_server
-            self._httpd = make_server('', self._port, self._wsgi_app, server_class=functools.partial(ThreadPoolWSGIServer, 10))
+            if self._mode == 'coroutine':
+                sc = functools.partial(TaskPoolWSGIServer, self.__executor__)
+            else:
+                sc = functools.partial(ThreadPoolWSGIServer, 20)
+
+            self._httpd = make_server('', self._port, self._wsgi_app, server_class=sc)
             self._httpd.serve_forever()
         except BaseException as e:
             logger.error('simple_wsgi_serv httpd fails')
