@@ -6,7 +6,6 @@ from gumpy.deco import *
 import os
 import threading
 import json
-import argparse
 import mimetypes
 
 try:
@@ -17,15 +16,10 @@ except ImportError:
 import logging
 logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-p', '--path',
-                    dest='plugins_path', default='plugins',
-                    help='plugins directory')
-_plugins_path = parser.parse_args().plugins_path
-_config_path = os.path.join(_plugins_path, 'config.ini')
-
 def _repo(framework):
     rt = []
+    _plugins_path = framework.repo_path
+    print(_plugins_path)
     for fn in os.listdir(_plugins_path):
         fp = os.path.join(_plugins_path, fn)
         bn, ext = os.path.splitext(fn)
@@ -131,7 +125,7 @@ class WebConsoleServer(threading.Thread):
             self._httpd = make_server('', 3040, WSGIApplication(self.__framework__))
             self._httpd.serve_forever()
         except BaseException as e:
-            logger.error('simple_wsgi_serv httpd fail to start')
+            logger.error('web_console httpd fail to start')
             logger.exception(e)
 
     def on_start(self):

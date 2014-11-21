@@ -13,11 +13,11 @@ try:
 except ImportError:
     import configparser
 try:
-    from importlib import reload
-except ImportError:
-    pass
+    reload
+except NameError:
+    from imp import reload
+from imp import load_source
 from .configuration import LocalConfiguration
-
 from inspect import isgeneratorfunction
 import types
 
@@ -481,18 +481,12 @@ class BundleContext(object):
         if os.path.isfile(abspath):
             fn, ext = os.path.splitext(os.path.basename(abspath))
             if ext == '.py':
-                try:
-                    from importlib.machinery import SourceFileLoader
-                    loader = lambda n, p: SourceFileLoader(n, p).load_module()
-                except ImportError:
-                    from imp import load_source
-                    loader = lambda n, p: load_source(n, p)
-                self._module = loader(fn, abspath)
+                self._module = load_source(fn, abspath)
             elif ext == '.zip':
                 self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
-            self._module = importlib.import_module(uri)
+            self._module = __import__(uri, fromlist=(uri.rsplit('.', 1)[-1],))
             reload(self._module)
             self._path = os.path.dirname(self._module.__file__)
 
@@ -613,8 +607,9 @@ class BundleContext(object):
             return self.__framework__.bundles[u.bundle]
 
 class Framework(object):
-    def __init__(self, configuration=None):
+    def __init__(self, configuration=None, repo_path=None):
         self.__executor__ = _Executor()
+        self._repo_path = repo_path
         self._bundles = {}
         self._lock = threading.Lock()
         self._binders = set()
@@ -627,6 +622,10 @@ class Framework(object):
     def _consume(self, work_list):
         for consumer, producer in work_list:
             consumer(producer)
+
+    @property
+    def repo_path(self):
+        return self._repo_path
 
     @property
     def bundles(self):
