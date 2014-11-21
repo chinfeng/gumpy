@@ -108,6 +108,7 @@ class _GeneratorFuture(_BaseFuture):
 class _Executor(object):
     def __init__(self):
         self._tasks = collections.deque()
+        self._incoming_evt = threading.Event()
     def _generator_wrapper(self, fn, args, kwds):
         yield fn(*args, **kwds)
     def _submit(self, fn, exclusive, args, kwds):
@@ -117,15 +118,19 @@ class _Executor(object):
         else:
             f = _GeneralFuture(self)
             self._tasks.append((self._generator_wrapper(fn, args, kwds), f, exclusive))
+        self._incoming_evt.set()
         return f
     def submit(self, fn, *args, **kwds):
         return self._submit(fn, False, args, kwds)
     def exclusive_submit(self, fn, *args, **kwds):
         return self._submit(fn, True, args, kwds)
-    def step(self):
+    def step(self, block=False):
+        if block:
+            self._incoming_evt.wait()
         try:
             gen, f, exclusive = self._tasks.popleft()
         except IndexError:
+            self._incoming_evt.clear()
             return
         try:
             f.send_result(next(gen))
@@ -714,8 +719,8 @@ class Framework(object):
     def wait_until_idle(self):
         return self.__executor__.wait_until_idle()
 
-    def step(self):
-        self.__executor__.step()
+    def step(self, block=False):
+        self.__executor__.step(block)
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

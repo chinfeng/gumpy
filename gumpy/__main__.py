@@ -3,11 +3,16 @@ __author__ = 'chinfeng'
 
 import os
 import sys
+import threading
 from .console import GumCmd
 from .framework import Framework
 from .configuration import LocalConfiguration
 
-def main():
+def _framework_loop(framework):
+    while True:
+        framework.step(True)
+
+def main(autostep=False):
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path',
@@ -23,6 +28,10 @@ def main():
         os.mkdir(conf_pt)
     fmk = Framework(LocalConfiguration(conf_pt))
     cmd = GumCmd(fmk, pt)
+    if autostep:
+        t = threading.Thread(target=_framework_loop, args=(fmk, ))
+        t.setDaemon(True)
+        t.start()
     cmd.cmdloop()
 
 if __name__ == '__main__':
