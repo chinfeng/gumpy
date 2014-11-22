@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 def _repo(framework):
     rt = []
     _plugins_path = framework.repo_path
-    print(_plugins_path)
     for fn in os.listdir(_plugins_path):
         fp = os.path.join(_plugins_path, fn)
         bn, ext = os.path.splitext(fn)
@@ -81,6 +80,7 @@ class WSGIApplication(object):
                 path = (environ.get('SCRIPT_NAME', '') + environ.get('PATH_INFO', '')).split('/')
                 action = path[1]
                 params = json.loads(environ['wsgi.input'].read(int(environ['CONTENT_LENGTH'])).decode('utf-8') if environ['CONTENT_LENGTH'] else '{}', encoding='UTF-8')
+                _f = None
                 if action == 'repo':
                     rt = _repo(self._framework)
                 elif action == 'list':
@@ -101,7 +101,7 @@ class WSGIApplication(object):
                     start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
                     yield '404: Not Found'.encode('utf-8')
                     return
-                self._framework.wait_until_idle()
+                if _f: _f.wait()
                 start_response('200 OK', [('Content-type', 'application/json'), ])
                 yield json.dumps(rt, indent=4).encode('utf-8')
         except FileNotFoundError:

@@ -2,10 +2,7 @@
 __author__ = 'chinfeng'
 
 import os
-import imp
-import importlib
 import zipimport
-import itertools
 import threading
 import collections
 try:
@@ -149,10 +146,10 @@ class _Executor(object):
         return not bool(self._tasks)
 
 def async(func):
-    def _async_callable(instance, *args, **kwargs):
+    def _async_callable(instance, *args, **kwds):
         if hasattr(instance, '__executor__'):
             method = types.MethodType(func, instance)
-            return instance.__executor__.submit(method, *args, **kwargs)
+            return instance.__executor__.submit(method, *args, **kwds)
         else:
             return func
     return _async_callable
@@ -300,7 +297,7 @@ class Task(object):
     def __call__(self, *args, **kwds):
         method = types.MethodType(self._fn, self._instance)
         return method(*args, **kwds)
-    def start(self, *args, **kwds):
+    def spawn(self, *args, **kwds):
         if hasattr(self._instance, '__executor__'):
             method = types.MethodType(self._fn, self._instance)
             return self._instance.__executor__.submit(method, *args, **kwds)

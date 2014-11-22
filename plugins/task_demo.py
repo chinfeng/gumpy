@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 class TaskDemo(object):
     def __init__(self):
         self._msg = None
-        self.message_task.start()
-        self.counter_task.start()
+        self.message_task.spawn()
+        self.counter_task.spawn()
 
     @task
     def message_task(self):
