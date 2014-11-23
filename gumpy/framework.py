@@ -10,10 +10,23 @@ try:
 except ImportError:
     import configparser
 try:
+    # 2.x
     reload
 except NameError:
-    from imp import reload
-from imp import load_source
+    try:
+        # 3.3
+        from imp import reload
+    except ImportError:
+        # 3.4
+        from importlib import reload
+try:
+    # 2.x - 3.3
+    from imp import load_source
+except ImportError:
+    # 3.4
+    from importlib.machinery import SourceFileLoader
+    load_source = lambda fullname, path: SourceFileLoader(fullname, path).load_module()
+from importlib import import_module
 from .configuration import LocalConfiguration
 from inspect import isgeneratorfunction
 import types
@@ -156,6 +169,7 @@ def async(func):
 
 _immutable_prop = lambda v: property(lambda self, value=v: value)
 _uri_class = collections.namedtuple('GumURI', ('host', 'port', 'bundle', 'service'))
+_subtract_dir = lambda a, b: {an for an in dir(a) if an not in dir(b) and not an.startswith('_')}
 _BUNDLE_LEVEL = 0
 _SERVICE_LEVEL = 1
 
@@ -364,7 +378,7 @@ class ServiceReference(object):
         cls.__reference__ = self
         self._cls = cls
         self._name = name or cls.__name__
-        if isinstance(provides, list):
+        if isinstance(provides, (list, tuple)):
             self._provides = set(provides)
         elif isinstance(provides, set):
             self._provides = provides
@@ -412,15 +426,16 @@ class ServiceReference(object):
     def start(self):
         if not self._instance:
             instance = self._cls()
-            if 'on_start' in dir(instance):
+            instance_dir = _subtract_dir(instance, object)
+            if 'on_start' in instance_dir:
                 instance.on_start()
             self._instance = instance
             self._events = set(filter(
                 lambda obj: isinstance(obj, EventSlot),
-                (getattr(instance, an) for an in dir(instance))))
+                (getattr(instance, an) for an in instance_dir)))
             self._consumers = set(filter(
                 lambda obj: isinstance(obj, _Consumer),
-                (getattr(instance, an) for an in dir(instance))))
+                (getattr(instance, an) for an in instance_dir)))
 
             # bind all producers
             binders = { c for c in self._consumers if isinstance(c, Binder) }
@@ -483,7 +498,7 @@ class BundleContext(object):
                 self._module = zipimport.zipimporter(abspath).load_module(fn)
             self._path = abspath
         else:
-            self._module = __import__(uri, fromlist=(uri.rsplit('.', 1)[-1],))
+            self._module = import_module(uri)
             reload(self._module)
             self._path = os.path.dirname(self._module.__file__)
 
@@ -492,7 +507,7 @@ class BundleContext(object):
         else:
             self._name = self._module.__name__
 
-        for attr_name in dir(self._module):
+        for attr_name in _subtract_dir(self._module, types.ModuleType):
             attr = getattr(self._module, attr_name)
             if isinstance(attr, Annotation):
                 subject = attr.subject
