@@ -224,26 +224,30 @@ class ServiceUnavaliableError(RuntimeError):
 
 class Annotation(object):
     def __init__(self, subject, **metadata):
-        self._nest = None
-        self._subject = subject
-        if isinstance(self._subject, Annotation):
-            subject.nest = self
+        if isinstance(subject, Annotation):
+            self._subject = subject._subject
+            self._nested = subject
+            subject._nesting = self
+        else:
+            self._subject = subject
+            self._nested = None
+        self._nesting = None
         self._metadata = metadata
     def __call__(self, *args, **kwds):
         return self._subject(*args, **kwds)
     @property
-    def nest(self):
-        return self._nest
-    @nest.setter
-    def nest(self, nest):
-        self._nest = nest
+    def nesting(self):
+        return self._nesting
     @property
-    def root_nest(self):
-        return self.nest.root_nest if self.nest else self
+    def nested(self):
+        return self._nested
+    @property
+    def root_nesting(self):
+        return self.nesting.root_nesting if self.nesting else self
     @property
     def subject(self):
-        if isinstance(self._subject, Annotation):
-            return self._subject.subject
+        if self._nested:
+            return self._nested.subject
         else:
             return self._subject
     @property
@@ -260,14 +264,13 @@ class Annotation(object):
                 metadata[k] = v
         return metadata
 
-    def _other_metadata_items(self, subject=None):
-        s = subject or self
-        if isinstance(s, Annotation):
-            for item in s._metadata.items():
+    def _other_metadata_items(self, annotation=None):
+        s = annotation or self
+        for item in s._metadata.items():
+            yield item
+        if s._nested:
+            for item in self._other_metadata_items(s._nested):
                 yield item
-            if isinstance(s._subject, Annotation):
-                for item in self._other_metadata_items(s._subject):
-                    yield item
 
 class ServiceAnnotation(Annotation):
     def __init__(self, subject, name=None):
@@ -275,8 +278,8 @@ class ServiceAnnotation(Annotation):
 
     @property
     def subject(self):
-        metadata = self.root_nest.metadata
-        return ServiceReferenceFactory(super(self.__class__, self).subject, metadata.get('name'), metadata.get('provides', None))
+        metadata = self.root_nesting.metadata
+        return ServiceReferenceFactory(self._subject, metadata.get('name'), metadata.get('provides', None))
 
 class ServiceReferenceFactory(object):
     def __init__(self, cls, name=None, provides=None):
