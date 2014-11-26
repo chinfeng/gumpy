@@ -25,3 +25,9 @@ class SampleServiceB(object):
     @event
     def on_test_event(self, txt):
         self.evt_msg = txt
+
+@service
+@provide('sample_only')
+class SampleServiceOnly(object):
+    pass
+

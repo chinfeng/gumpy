@@ -72,13 +72,24 @@ class GumTestCase(TestCase):
         self.assertEqual(fsa.evt_msg, 'file_test')
         self.assertEqual(fsb.evt_msg, 'file_test')
 
-        self._fmk.em.on_test_event.send('global_evt_test')
+        fmk.em.on_test_event.send('global_evt_test')
         self.assertEqual(msa.evt_msg, 'global_evt_test')
         self.assertEqual(msb.evt_msg, 'global_evt_test')
         self.assertEqual(fsa.evt_msg, 'global_evt_test')
         self.assertEqual(fsb.evt_msg, 'global_evt_test')
 
+        fmk.install_bundle('samples.mod_only_bdl').result().start().wait()
+        sample_only = [
+            fmk.get_service('file_bdl:SampleServiceOnly'),
+            fmk.get_service('mod_only_bdl:SampleServiceOnly')
+        ]
+        self.assertEqual(len(msa.only), 1)
+        self.assertIn(list(msa.only)[0], sample_only)
         fmk.get_bundle('file_bdl').stop().result()
+        sample_only.pop(0)  # file_bdl:SampleServiceOnly has been removed
         self.assertNotIn(fsa, msa.ones)
         self.assertNotIn(fsb, msa.twos)
+        self.assertEqual(len(msa.only), 1)
+        self.assertIn(list(msa.only)[0], sample_only)
+
 

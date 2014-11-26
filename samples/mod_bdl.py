@@ -21,6 +21,7 @@ class SampleServiceA(object):
     def on_start(self):
         self.ones = set()
         self.twos = set()
+        self.only = set()
 
     @bind('sample_res_one')
     def sr_one(self, res):
@@ -45,6 +46,16 @@ class SampleServiceA(object):
     @event
     def on_test_event(self, txt):
         self.evt_msg = txt
+
+    @bind('sample_only', '1..1')
+    def sr_only(self, res):
+        logger.debug('sr_only bind: {0}'.format(res))
+        self.only.add(res)
+
+    @sr_only.unbind
+    def unbind_sr_only(self, res):
+        logger.debug('sr_only unbind: {0}'.format(res))
+        self.only.remove(res)
 
 @service
 @provide('sample_res_two')

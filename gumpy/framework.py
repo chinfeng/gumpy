@@ -320,25 +320,36 @@ class Task(object):
             return self._instance.__executor__.submit(method, *args, **kwds)
 
 class Consumer(object):
-    def __init__(self, instance, bind_fn, unbind_fn, resource_uri):
+    def __init__(self, instance, bind_fn, unbind_fn, resource_uri, cardinality):
         self._instance = instance
         self._bind_fn = bind_fn
         self._unbind_fn = unbind_fn
         self._resource_uri = resource_uri
+        self._optionality, self._multiplicity = cardinality.split('..')
         self._consumed_resources = set()
     def bind(self, resource_reference):
-        if self.match(resource_reference) and (self._instance is not resource_reference):
+        if self.match(resource_reference) and (self._instance is not resource_reference) and (not self.is_filled()):
             self._consumed_resources.add(resource_reference)
-            return self._bind_fn(self._instance, resource_reference.get_service())
+            self._bind_fn(self._instance, resource_reference.get_service())
+            self._instance.__reference__.providing()
     def unbind(self, resource_reference):
         if resource_reference in self._consumed_resources:
             self._consumed_resources.remove(resource_reference)
-            return self._unbind_fn(self._instance, resource_reference.get_service())
+            self._unbind_fn(self._instance, resource_reference.get_service())
+            # find another provider if instance become unfilled
+            if not self.is_filled():
+                for p in self._instance.__framework__.producers():
+                    if p is not resource_reference: self.bind(p)
     def match(self, reference):
         return self.resource_uri in reference.provides
     @property
     def resource_uri(self):
         return self._resource_uri
+    @property
+    def is_satisfied(self):
+        return len(self._consumed_resources) >= int(self._optionality)
+    def is_filled(self):
+        return bool(self._consumed_resources) and self._multiplicity == '1'
 
 class EventSlot(object):
     def __init__(self, instance, func):
@@ -421,12 +432,21 @@ class ServiceReference(object):
         return bool(self._instance)
 
     @property
+    def is_satisfied(self):
+        return self._instance and False not in (c.is_satisfied for c in self._consumers)
+
+    @property
     def __framework__(self):
         return self.__context__.__framework__
 
     @property
     def __executor__(self):
         return self.__context__.__framework__.__executor__
+
+    def providing(self):
+        if self._provides and self.is_satisfied:
+            for c in self.__framework__.consumers():
+                c.bind(self)
 
     def start(self):
         if not self._instance:
@@ -442,15 +462,13 @@ class ServiceReference(object):
                 lambda obj: isinstance(obj, Consumer),
                 (getattr(instance, an) for an in instance_dir)))
 
-            # bind all producers
-            for p in self.__framework__.producers():
-                for c in self._consumers:
-                    c.bind(p)
-
-            # produce for all binders
-            if self._provides:
-                for c in self.__framework__.consumers():
-                    c.bind(self)
+            if self._consumers:
+                # bind all producers
+                for p in self.__framework__.producers():
+                    for c in self._consumers:
+                        c.bind(p)
+            elif self._provides:
+                self.providing()
 
     def stop(self):
         if self._instance:
