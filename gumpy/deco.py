@@ -4,7 +4,7 @@ __author__ = 'chinfeng'
 import functools
 
 from .framework import (
-    Binder, Unbinder, Annotation, ServiceAnnotation, Task,
+    Consumer, Annotation, ServiceAnnotation, Task,
     EventSlot, Activator, Deactivator, ServiceUnavaliableError)
 
 def require(*service_names, **service_dict):
@@ -26,28 +26,32 @@ def require(*service_names, **service_dict):
         return injected_func
     return deco
 
-class _BinderHelper(object):
-    def __init__(self, func, resource_uri):
-        self._func = func
+class _ConsumerHelper(object):
+    def __init__(self, fn, resource_uri):
+        self._fn = fn
         self._resource_uri = resource_uri
-        self.unbind = functools.partial(_UnbinderHelper, resource_uri=self._resource_uri)
+        self._unbind_fn = lambda instance: None
+        # self.unbind = functools.partial(_UnbinderHelper, resource_uri=self._resource_uri)
     def __get__(self, instance, owner):
         if instance:
-            return Binder(instance, self._func, self._resource_uri)
+            return Consumer(instance, self._fn, self._unbind_fn, self._resource_uri)
         else:
             raise TypeError('Service instance is needed for a binder')
+    def unbind(self, fn):
+        self._unbind_fn = fn
+        return fn
 
-class _UnbinderHelper(object):
-    def __init__(self, func, resource_uri):
-        self._func = func
-        self._resource_uri = resource_uri
-    def __get__(self, instance, owner):
-        if instance:
-            return Unbinder(instance, self._func, self._resource_uri)
-        else:
-            raise TypeError('Service instance is needed for a unbinder')
+# class _UnbinderHelper(object):
+#     def __init__(self, func, resource_uri):
+#         self._func = func
+#         self._resource_uri = resource_uri
+#     def __get__(self, instance, owner):
+#         if instance:
+#             return Unbinder(instance, self._func, self._resource_uri)
+#         else:
+#             raise TypeError('Service instance is needed for a unbinder')
 
-bind = lambda resource: functools.partial(_BinderHelper, resource_uri=resource)
+bind = lambda resource: functools.partial(_ConsumerHelper, resource_uri=resource)
 
 class _EventHepler(object):
     def __init__(self, func):

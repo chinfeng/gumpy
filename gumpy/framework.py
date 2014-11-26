@@ -319,25 +319,26 @@ class Task(object):
             method = types.MethodType(self._fn, self._instance)
             return self._instance.__executor__.submit(method, *args, **kwds)
 
-class _Consumer(object):
-    def __init__(self, instance, func, resource_uri):
+class Consumer(object):
+    def __init__(self, instance, bind_fn, unbind_fn, resource_uri):
         self._instance = instance
-        self._func = func
+        self._bind_fn = bind_fn
+        self._unbind_fn = unbind_fn
         self._resource_uri = resource_uri
-    def __call__(self, resource_reference):
+        self._consumed_resources = set()
+    def bind(self, resource_reference):
         if self.match(resource_reference) and (self._instance is not resource_reference):
-            return self._func(self._instance, resource_reference.get_service())
+            self._consumed_resources.add(resource_reference)
+            return self._bind_fn(self._instance, resource_reference.get_service())
+    def unbind(self, resource_reference):
+        if resource_reference in self._consumed_resources:
+            self._consumed_resources.remove(resource_reference)
+            return self._unbind_fn(self._instance, resource_reference.get_service())
     def match(self, reference):
         return self.resource_uri in reference.provides
     @property
     def resource_uri(self):
         return self._resource_uri
-
-class Binder(_Consumer):
-    pass
-
-class Unbinder(_Consumer):
-    pass
 
 class EventSlot(object):
     def __init__(self, instance, func):
@@ -391,8 +392,9 @@ class ServiceReference(object):
             self._provides = set()
         self._instance = None
 
-        self._consumers = None
-        self._events = None
+        self._consumers = set()
+        self._events = set()
+        self._providing_consumers = set()
 
     @property
     def name(self):
@@ -437,28 +439,27 @@ class ServiceReference(object):
                 lambda obj: isinstance(obj, EventSlot),
                 (getattr(instance, an) for an in instance_dir)))
             self._consumers = set(filter(
-                lambda obj: isinstance(obj, _Consumer),
+                lambda obj: isinstance(obj, Consumer),
                 (getattr(instance, an) for an in instance_dir)))
 
             # bind all producers
-            binders = { c for c in self._consumers if isinstance(c, Binder) }
             for p in self.__framework__.producers():
-                for c in binders:
-                    c(p)
+                for c in self._consumers:
+                    c.bind(p)
 
             # produce for all binders
             if self._provides:
-                for c in self.__framework__.binders():
-                    c(self)
+                for c in self.__framework__.consumers():
+                    c.bind(self)
 
     def stop(self):
         if self._instance:
             # produce for all unbinders
             if self._provides:
-                for c in self.__framework__.unbinders():
-                    c(self)
-            self._consumers = None
-            self._events = None
+                for c in self.__framework__.consumers():
+                    c.unbind(self)
+            self._consumers = set()
+            self._events = set()
             if 'on_stop' in dir(self._instance):
                 self._instance.on_stop()
             del self._instance
@@ -627,8 +628,6 @@ class Framework(object):
         self._repo_path = repo_path
         self._bundles = {}
         self._lock = threading.Lock()
-        self._binders = set()
-        self._unbinders = set()
         self._producers = set()
         self._configuration = configuration or LocalConfiguration()
         self._state_conf = self.configuration['.state']
@@ -674,12 +673,6 @@ class Framework(object):
                 if sr.is_avaliable:
                     for c in sr.consumers:
                         yield c
-
-    def binders(self):
-        return filter(lambda c: isinstance(c, Binder), self.consumers())
-
-    def unbinders(self):
-        return filter(lambda c: isinstance(c, Unbinder), self.consumers())
 
     def get_bundle(self, uri, default=None):
         return self._bundles.get(uri, default)
