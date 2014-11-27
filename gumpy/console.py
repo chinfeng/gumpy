@@ -31,21 +31,9 @@ class GumCmd(Cmd):
         return True
 
     def do_repo(self, line):
-        for fn in os.listdir(self._plugins_path):
-            fp = os.path.join(self._plugins_path, fn)
-            bn, ext = os.path.splitext(fn)
-            uri = fn
-            if bn[:2] == '__':
-                continue
-            if os.path.isdir(fp) and bn[0] != '.':
-                tp = '[PKG]'
-            elif ext == '.zip':
-                tp = '[ZIP]'
-            elif ext == '.py':
-                tp = '[MOD]'
-                uri = bn
-            else:
-                continue
+        for repo in self._framework.get_repo_list().values():
+            uri = repo.get('uri')
+            tp = repo.get('tp')
 
             for bdl in self._framework.bundles.values():
                 if bdl.uri == uri:

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 __author__ = 'chinfeng'
 
+import zipfile
 import os
 import zipimport
 import threading
@@ -488,7 +489,6 @@ class ServiceReference(object):
         if self._instance:
             return self._instance
         else:
-            # TODO
             raise ServiceUnavaliableError('{0}:{1}'.format(self.__context__.name, self._name))
 
 class BundleContext(object):
@@ -525,7 +525,7 @@ class BundleContext(object):
             reload(self._module)
             self._path = os.path.dirname(self._module.__file__)
 
-        name = getattr(self._module, '__gum_bundle__', None)
+        name = getattr(self._module, '__gum__', None)
         name = name or getattr(self._module, '__symbol__', None)
         self._name = name or self._module.__name__
 
@@ -694,6 +694,39 @@ class Framework(object):
 
     def get_bundle(self, uri, default=None):
         return self._bundles.get(uri, default)
+
+    def get_repo_list(self):
+        repo_list = {}
+        is_bundle = lambda code: 'gumpy.deco' in code.co_names or '__gum__' in code.co_names
+        for filename in os.listdir(self._repo_path):
+            bn, ext = os.path.splitext(filename)
+            if os.path.isdir(os.path.join(self._repo_path, filename)):
+                # package
+                init_pt = os.path.join(self._repo_path, filename, '__init__.py')
+                if os.path.exists(init_pt):
+                    with open(init_pt) as fd:
+                        code = compile(fd.read(), init_pt, 'exec')
+                        if is_bundle(code):
+                            repo_list[filename] = dict(tp='PKG', uri=filename)
+            elif ext == '.py':
+                # module
+                mod_pt = os.path.join(self._repo_path, filename)
+                with open(mod_pt) as fd:
+                    code = compile(fd.read(), mod_pt, 'exec')
+                    if is_bundle(code):
+                        repo_list[filename] = dict(tp='MOD', uri=bn)
+            elif ext == '.zip':
+                # zip
+                init_pt = '/'.join((bn, '__init__.py'))
+                with zipfile.ZipFile(os.path.join(self.repo_path, filename)) as zf:
+                    code = compile(
+                        zf.read(init_pt),
+                        os.path.join(self._repo_path, filename, init_pt),
+                        'exec'
+                    )
+                    if is_bundle(code):
+                        repo_list[filename] = dict(tp='ZIP', uri=filename)
+        return repo_list
 
     @async
     def install_bundle(self, uri):
