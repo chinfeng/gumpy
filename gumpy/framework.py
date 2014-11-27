@@ -387,10 +387,6 @@ class _EventManager(object):
 class ServiceReference(object):
     def __init__(self, bundle, cls, name=None, provides=None):
         self.__context__ = bundle
-        cls.__context__ = bundle
-        cls.__framework__ = bundle.__framework__
-        cls.__executor__ = bundle.__framework__.__executor__
-        cls.__reference__ = self
         self._cls = cls
         self._name = name or cls.__name__
         if isinstance(provides, (list, tuple)):
@@ -450,7 +446,12 @@ class ServiceReference(object):
 
     def start(self):
         if not self._instance:
-            instance = self._cls()
+            instance = self._cls.__new__(self._cls)
+            instance.__context__ = self.__context__
+            instance.__framework__ = self.__framework__
+            instance.__executor__ = self.__executor__
+            instance.__reference__ = self
+            instance.__init__()
             instance_dir = _subtract_dir(instance, object)
             if 'on_start' in instance_dir:
                 instance.on_start()
@@ -524,10 +525,9 @@ class BundleContext(object):
             reload(self._module)
             self._path = os.path.dirname(self._module.__file__)
 
-        if hasattr(self._module, '__symbol__'):
-            self._name = self._module.__symbol__
-        else:
-            self._name = self._module.__name__
+        name = getattr(self._module, '__gum_bundle__', None)
+        name = name or getattr(self._module, '__symbol__', None)
+        self._name = name or self._module.__name__
 
         for attr_name in _subtract_dir(self._module, types.ModuleType):
             attr = getattr(self._module, attr_name)
