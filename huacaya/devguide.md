@@ -30,7 +30,7 @@
 
 2. 对 wsgiref.simple_server 作一点改造，支持线程模式（详见[ThreadPoolWSGIServer](tserv.py#L12)）。
 
-3. 在 [WSGIService.__init__](tserv.py#L38) 中启动服务器，并在 [WSGIService.on_stop](tserv.py#L56) 方法让组件停止的时候关闭 WSGI 服务器。
+3. 在 [WSGIService.\_\_init\_\_](tserv.py#L38) 中启动服务器，并在 [WSGIService.on_stop](tserv.py#L56) 方法让组件停止的时候关闭 WSGI 服务器。
 
 4. 实现分发 WSGI 应用的方法，使用 [bind](tserv.py#L61)/[unbind](tserv.py#L69) 方法，处理应用的登记和注销。应用的部分请参见下文的[第一个应用组件](#第一个应用组件)
 
@@ -53,7 +53,7 @@
 
 在 gumpy 容器可使用协程模式，我们可以在 [cserv.py](cserv.py) 中看到如何使用协程模式实现 WSGI 服务器。
 
-1. 在所有的 gumpy 组件中，都有一个内置的成员“__executor__”，为整个容器的调度接口。从这个接口延伸出来可以就可以在代码中使用协程调度，详见[TaskPoolWSGIServer构造函数](cserv.py#L45)。
+1. 在所有的 gumpy 组件中，都有一个内置的成员“\_\_executor\_\_”，为整个容器的调度接口。从这个接口延伸出来可以就可以在代码中使用协程调度，详见[TaskPoolWSGIServer构造函数](cserv.py#L45)。
 
 2. 接口传递给协程服务器的实现类[TaskPoolWSGIServer](cserv.py#L11)，即可使用 submit 方法提交协程任务，语法如下：
 
@@ -64,7 +64,7 @@
 3. 我们开启另外一个线程，执行 [serve_forever](cserv.py#L27) 函数。如果我们在启动容器的时候，带了 -a 参数，那么内存中就存在 3 个线程：
 
     * 主线程，负责 gumpy console 的执行
-    * gumpy 的自动推进线程，不停的推进协程调度（实现代码见 [gumpy/__main__.py](../gumpy/__main__.py#L35)
+    * gumpy 的自动推进线程，不停的推进协程调度（实现代码见 [gumpy/\_\_main\_\_.py](../gumpy/\_\_main\_\_.py#L35)
     * cserv:WSGIServer 中的 sock 线程
 
     处理流程是：由 serve_forever 启动的 sock 线程接受到客户端以后，就把这个处理操作提交给协程调度器，然后由 gumpy 的协程调度器负责处理。
@@ -88,7 +88,7 @@
 
 3. provide 装饰器可以多次定义，这里我们希望同时给两个服务器提供应用，见[firstapp.py](firstapp.py#L15)
 
-4. 在前面的服务器中，使用了 __route__ 作为应用的目录参数，可以指定自身的路径，见[firstapp.py](firstapp.py#L17)
+4. 在前面的服务器中，使用了 \_\_route\_\_ 作为应用的目录参数，可以指定自身的路径，见[firstapp.py](firstapp.py#L17)
 
 5. 我们可以启动这个组件：
 
@@ -99,7 +99,7 @@
 
 	*PS：当“stop firstapp”以后，就会在动态的环境下触发服务的 unbind，这样 firstapp 就无法访问了。*
 
-*PS：可以看到，只要服务 provide 出去的东西是标准的 wsgi application 接口，就能动态绑定到服务器上。wsgi application 的上层何种应用框架，并无限制，所以我们可以在不同的 __route__ 上，提供 tornado、webpy、flask 甚至是 django 的集成，相互不影响，又能够动态装卸。*
+*PS：可以看到，只要服务 provide 出去的东西是标准的 wsgi application 接口，就能动态绑定到服务器上。wsgi application 的上层何种应用框架，并无限制，所以我们可以在不同的 \_\_route\_\_ 上，提供 tornado、webpy、flask 甚至是 django 的集成，相互不影响，又能够动态装卸。*
 
 # (未完待续) #
 
