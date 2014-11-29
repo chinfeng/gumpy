@@ -33,14 +33,18 @@ class _ConsumerHelper(object):
         self._resource_uri = resource_uri
         self._cardinality = cardinality
         self._unbind_fn = lambda instance: None
+        self._consumers = {}
     def __get__(self, instance, owner):
         if instance:
-            return Consumer(instance, self._fn, self._unbind_fn, self._resource_uri, self._cardinality)
+            _id = id(instance)
+            if _id not in self._consumers:
+                self._consumers[_id] = Consumer(instance, self._fn, self._unbind_fn, self._resource_uri, self._cardinality)
+            return self._consumers[_id]
         else:
             raise TypeError('Service instance is needed for a binder')
     def unbind(self, fn):
         self._unbind_fn = fn
-        return fn
+        return self
 
 bind = lambda resource, cardinality='1..n': functools.partial(_ConsumerHelper, resource_uri=resource, cardinality=cardinality)
 
@@ -68,8 +72,7 @@ def configuration(**config_map):
                         ck, default = c[0], c[1] if len(c) > 1 else None
                     else:
                         break
-                    if ck in config:
-                        _kwds[p] = config.get(ck, default)
+                    _kwds[p] = config.get(ck, default)
                 except KeyError:
                     pass
             return func(self, *args, **_kwds)

@@ -14,9 +14,9 @@ class Configuration(object):
     def persist(self):
         raise NotImplementedError
 
-class _DictObject(collections.defaultdict):
+class _DictObject(dict):
     def __init__(self, other=None):
-        super(self.__class__, self).__init__(_DictObject)
+        super(self.__class__, self).__init__(other or {})
         if other:
             self.update(other)
     def __setattr__(self, key, value):
@@ -34,12 +34,11 @@ class _LocalDocument(object):
         except BaseException as err:
             super(self.__class__, self).__setattr__(
                 '_dict_object', _DictObject())
-
     def __setattr__(self, key, value):
-        if key not in dir(self):
-            self._dict_object[key] = value
-        else:
+        if key in dir(self):
             super(self.__class__, self).__setattr__(key, value)
+        else:
+            self._dict_object[key] = value
     def __getattr__(self, key):
         try:
             return super(self.__class__, self).__getattr__(key)

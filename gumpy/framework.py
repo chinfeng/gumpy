@@ -765,9 +765,9 @@ class Framework(object):
                     bdl = uri_dict[uri]
                 if start:
                     bdl.start().wait()
-            except BaseException as e:
-                logger.error('bundle {0} init error:'.format(uri))
-                logger.exception(e)
+            except BaseException as err:
+                err.args = ('bundle {0} init error:'.format(uri), ) + err.args
+                logger.exception(err)
 
     def save_state(self):
         for bdl in self.bundles.values():
