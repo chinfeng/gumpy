@@ -124,9 +124,9 @@ class WebConsoleServer(threading.Thread):
             from wsgiref.simple_server import make_server
             self._httpd = make_server('', 3040, WSGIApplication(self.__framework__))
             self._httpd.serve_forever()
-        except BaseException as e:
-            logger.error('web_console httpd fail to start')
-            logger.exception(e)
+        except BaseException as err:
+            err.args = ('web_console httpd fail to start', ) + err.args
+            logger.exception(err)
 
     def on_start(self):
         self.start()
