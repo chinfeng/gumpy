@@ -62,9 +62,11 @@ def configuration(**config_map):
             config = self.__reference__.__context__.configuration
             for p, c in config_map.items():
                 try:
+                    c = tuple(c)
+                    default = c[1] if len(c) > 1 else None
                     if c in config:
-                        _kwds[p] = config.get(c)
-                except:
+                        _kwds[p] = config.get(c, default)
+                except KeyError:
                     pass
             return func(self, *args, **_kwds)
         return configuration_injected_func
