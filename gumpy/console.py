@@ -42,7 +42,7 @@ class GumCmd(Cmd):
             else:
                 st = ''
 
-            print('  {:<24}{:<24}{:<24}'.format(uri, tp, st))
+            print('  {:<24}{:<24}{:<24}'.format(uri, '[%s]' % tp, st))
 
     def do_install(self, line):
         if line[-1] == '&':

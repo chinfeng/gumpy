@@ -62,10 +62,14 @@ def configuration(**config_map):
             config = self.__reference__.__context__.configuration
             for p, c in config_map.items():
                 try:
-                    c = tuple(c)
-                    default = c[1] if len(c) > 1 else None
-                    if c in config:
-                        _kwds[p] = config.get(c, default)
+                    if isinstance(c, str):
+                        ck, default = c, None
+                    elif isinstance(c, (tuple, list)) and isinstance(c[0], str):
+                        ck, default = c[0], c[1] if len(c) > 1 else None
+                    else:
+                        break
+                    if ck in config:
+                        _kwds[p] = config.get(ck, default)
                 except KeyError:
                     pass
             return func(self, *args, **_kwds)
