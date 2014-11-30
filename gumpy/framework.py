@@ -498,7 +498,6 @@ class BundleContext(object):
     ST_ACTIVE = _immutable_prop((3, 'ACTIVE'))
     ST_STOPING = _immutable_prop((4, 'STOPING'))
     ST_UNINSTALLED = _immutable_prop((5, 'UNINSTALLED'))
-    ST_UNSATISFIED = _immutable_prop((6, 'ST_UNSATISFIED'))
 
     def __init__(self, framework, uri):
         self._framework = framework
