@@ -5,11 +5,6 @@ import os
 import traceback
 from cmd import Cmd
 
-try:
-    import ConfigParser as configparser
-except ImportError:
-    import configparser
-
 class GumCmd(Cmd):
     def __init__(self, framework, plugins_path):
         Cmd.__init__(self)
@@ -61,7 +56,7 @@ class GumCmd(Cmd):
             if not async:
                 f.result()
             self._save_config()
-        except BaseException:
+        except:
             print(traceback.format_exc())
 
     def do_list(self, line):
@@ -84,8 +79,8 @@ class GumCmd(Cmd):
                 if not async:
                     f.result()
                 self._save_config()
-            except BaseException as err:
-                print(err)
+            except:
+                print(traceback.format_exc())
         else:
             print('bundle not found')
 
@@ -104,8 +99,8 @@ class GumCmd(Cmd):
                 if not async:
                     f.result()
                 self._save_config()
-            except BaseException as err:
-                print(err)
+            except:
+                print(traceback.format_exc())
         else:
             print('bundle not found')
 
@@ -113,7 +108,7 @@ class GumCmd(Cmd):
         try:
             service_uri, call_caluse = line.split('.', 1)
             print(eval('self._framework.get_service(\'{0}\').{1}'.format(service_uri, call_caluse)))
-        except BaseException:
+        except:
             print(traceback.format_exc())
 
     def do_conf(self, line):
@@ -125,7 +120,7 @@ class GumCmd(Cmd):
             evt = self._framework.bundles[bn].em.on_configuration_changed
             evt.send(key, val)
             conf.persist()
-        except BaseException:
+        except:
             print(traceback.format_exc())
 
     def do_fireall(self, line):
@@ -133,7 +128,7 @@ class GumCmd(Cmd):
             evt, values = line.split(' ', 1)
             evt = self._framework.em[evt]
             evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
-        except BaseException:
+        except:
             print(traceback.format_exc())
 
     def do_fire(self, line):
@@ -141,7 +136,7 @@ class GumCmd(Cmd):
             bn, evt, values = line.split(' ', 2)
             evt = self._framework.bundles[bn].em[evt]
             evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
-        except BaseException:
+        except:
             print(traceback.format_exc())
 
     def do_step(self, line):

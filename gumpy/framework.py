@@ -329,20 +329,38 @@ class Consumer(object):
         self._optionality, self._multiplicity = cardinality.split('..')
         self._consumed_resources = set()
     def bind(self, resource_reference):
-        if self.match(resource_reference) and (self._instance is not resource_reference) and (not self.is_filled()):
-            self._consumed_resources.add(resource_reference)
-            self._bind_fn(self._instance, resource_reference.get_service())
-            self._instance.__reference__.providing()
+        try:
+            if all((
+                   (self.match(resource_reference)),
+                   (self._instance is not resource_reference),
+                   (not self.is_filled()),
+                   (resource_reference not in self._consumed_resources)
+               )):
+                self._consumed_resources.add(resource_reference)
+                self._bind_fn(self._instance, resource_reference.get_service())
+                # self._instance.__reference__.providing()
+                return True
+            else:
+                return False
+        except BaseException as err:
+            logger.exception(err)
+            return False
     def unbind(self, resource_reference):
-        if resource_reference in self._consumed_resources:
-            self._consumed_resources.remove(resource_reference)
-            self._unbind_fn(self._instance, resource_reference.get_service())
-            # find another provider if instance become unfilled
-            if not self.is_filled():
-                for p in self._instance.__framework__.producers():
-                    if p is not resource_reference: self.bind(p)
+        try:
+            if resource_reference in self._consumed_resources:
+                self._consumed_resources.remove(resource_reference)
+                self._unbind_fn(self._instance, resource_reference.get_service())
+                return True
+            else:
+                return False
+        except BaseException as err:
+            logger.exception(err)
+            return False
     def match(self, reference):
         return self.resource_uri in reference.provides
+    @property
+    def __reference__(self):
+        return self._instance.__reference__
     @property
     def resource_uri(self):
         return self._resource_uri
@@ -430,7 +448,7 @@ class ServiceReference(object):
 
     @property
     def is_satisfied(self):
-        return self._instance and False not in (c.is_satisfied for c in self._consumers)
+        return self._instance and all(c.is_satisfied for c in self._consumers)
 
     @property
     def __framework__(self):
@@ -465,19 +483,15 @@ class ServiceReference(object):
                 (getattr(instance, an) for an in instance_dir)))
 
             if self._consumers:
-                # bind all producers
-                for p in self.__framework__.producers():
-                    for c in self._consumers:
-                        c.bind(p)
+                for c in self._consumers:
+                    self.__framework__.digest(c)
             elif self._provides:
-                self.providing()
+                self.__framework__.digest(self)
 
     def stop(self):
         if self._instance:
-            # produce for all unbinders
             if self._provides:
-                for c in self.__framework__.consumers():
-                    c.unbind(self)
+                self.__framework__.dismiss(self)
             self._consumers = set()
             self._events = set()
             if 'on_stop' in dir(self._instance):
@@ -645,14 +659,42 @@ class Framework(object):
         self._repo_path = repo_path
         self._bundles = {}
         self._lock = threading.Lock()
-        self._producers = set()
         self._configuration = configuration or LocalConfiguration()
         self._state_conf = self.configuration['.state']
         self._event_manager = _EventManager(self)
 
-    def _consume(self, work_list):
-        for consumer, producer in work_list:
-            consumer(producer)
+    def dismiss(self, producer):
+        for c in self.consumers():
+            if c.unbind(producer) and (not c.is_filled()):
+                # find another provider if instance become unfilled
+                for p in filter(lambda sr, dismiss=producer: sr is not dismiss, self.producers()):
+                    c.bind(p)
+
+    def digest(self, entry):
+        if isinstance(entry, ServiceReference):
+            self._digest_from_producer(entry)
+        elif isinstance(entry, Consumer):
+            self._digest_from_consumer(entry)
+
+    def _digest_from_producer(self, producer):
+        if not producer.provides:
+            return
+
+        work_list = [producer, ]
+        while work_list:
+            p = work_list.pop(0)
+            if p.is_satisfied:
+                for c in self.consumers():
+                    if c.bind(p) and c.__reference__.provides:
+                        work_list.append(c.__reference__)
+
+    def _digest_from_consumer(self, consumer):
+        work_list = list(self.producers())
+        while work_list:
+            p = work_list.pop(0)
+            if p.is_satisfied:
+                if consumer.bind(p) and consumer.__reference__.provides:
+                    work_list.append(consumer.__reference__)
 
     @property
     def repo_path(self):
@@ -696,7 +738,7 @@ class Framework(object):
 
     def get_repo_list(self):
         repo_list = {}
-        is_bundle = lambda code: 'gumpy.deco' in code.co_names or '__gum__' in code.co_names
+        is_bundle = lambda co: 'gumpy.deco' in co.co_names or '__gum__' in co.co_names
         for filename in os.listdir(self._repo_path):
             bn, ext = os.path.splitext(filename)
             if os.path.isdir(os.path.join(self._repo_path, filename)):
