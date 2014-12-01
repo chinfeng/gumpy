@@ -66,6 +66,8 @@ class _LocalDocument(object):
                 json.dump(self._dict_object, fd)
     def close(self):
         self.persist()
+    def __del__(self):
+        self.close()
 
 class LocalConfiguration(Configuration):
     def __init__(self, path=None):
@@ -88,6 +90,9 @@ class LocalConfiguration(Configuration):
 
     def __getitem__(self, item):
         return self.__getattr__(item)
+
+    def __del__(self):
+        self.close()
 
     def close(self):
         for doc in self._docs.values():
