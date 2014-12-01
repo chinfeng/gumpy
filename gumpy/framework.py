@@ -135,9 +135,7 @@ class _Executor(object):
         return self._submit(fn, False, args, kwds)
     def exclusive_submit(self, fn, *args, **kwds):
         return self._submit(fn, True, args, kwds)
-    def step(self, block=False):
-        if block:
-            self._incoming_evt.wait()
+    def step(self):
         try:
             gen, f, exclusive = self._tasks.popleft()
         except IndexError:
@@ -153,11 +151,14 @@ class _Executor(object):
             f.send_result(StopIteration)
         except BaseException as err:
             f.set_exception(err)
-    def wait_until_idle(self):
-        while not self._tasks:
+    def join(self):
+        while self._task:
+            self.wait_until_active()
             self.step()
     def is_idle(self):
         return not bool(self._tasks)
+    def wait_until_active(self):
+        self._incoming_evt.wait()
 
 def async(func):
     def _async_callable(instance, *args, **kwds):
@@ -814,12 +815,6 @@ class Framework(object):
         for bdl in self.bundles.values():
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
         self.configuration.close()
-
-    def wait_until_idle(self):
-        return self.__executor__.wait_until_idle()
-
-    def step(self, block=False):
-        self.__executor__.step(block)
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

@@ -138,7 +138,7 @@ class GumCmd(Cmd):
     def do_step(self, line):
         n = int(line) if line.isdigit() else 1
         for i in range(n):
-            self._framework.step()
+            self._framework.__executor__.step()
 
     def emptyline(self):
-        self._framework.step()
+        self._framework.__executor__.step()

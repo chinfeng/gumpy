@@ -9,8 +9,10 @@ from .framework import Framework
 from .configuration import LocalConfiguration
 
 def _framework_loop(framework):
+    extr = framework.__executor__
     while True:
-        framework.step(True)
+        extr.wait_until_active()
+        extr.step()
 
 def main():
     import argparse
