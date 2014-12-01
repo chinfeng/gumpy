@@ -152,7 +152,7 @@ class _Executor(object):
         except BaseException as err:
             f.set_exception(err)
     def join(self):
-        while self._task:
+        while self._tasks:
             self.wait_until_active()
             self.step()
     def is_idle(self):
