@@ -16,13 +16,12 @@ class GumCmd(Cmd):
         self.intro = 'Gumpy runtime console'
         self.prompt = '>>> '
 
-    def _save_config(self):
-        self._framework.save_state()
-
     def do_EOF(self, line):
+        self._framework.close()
         return True
 
     def do_exit(self, line):
+        self._framework.close()
         return True
 
     def do_repo(self, line):
@@ -55,7 +54,6 @@ class GumCmd(Cmd):
             f = self._framework.install_bundle(uri)
             if not async:
                 f.result()
-            self._save_config()
         except:
             print(traceback.format_exc())
 
@@ -78,7 +76,6 @@ class GumCmd(Cmd):
                 f = bdl.start()
                 if not async:
                     f.result()
-                self._save_config()
             except:
                 print(traceback.format_exc())
         else:
@@ -98,7 +95,6 @@ class GumCmd(Cmd):
                 f = bdl.stop()
                 if not async:
                     f.result()
-                self._save_config()
             except:
                 print(traceback.format_exc())
         else:

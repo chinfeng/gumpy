@@ -810,10 +810,10 @@ class Framework(object):
                 err.args = ('bundle {0} init error:'.format(uri), ) + err.args
                 logger.exception(err)
 
-    def save_state(self):
+    def close(self):
         for bdl in self.bundles.values():
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
-        self._state_conf.persist()
+        self.configuration.close()
 
     def wait_until_idle(self):
         return self.__executor__.wait_until_idle()

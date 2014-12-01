@@ -64,6 +64,8 @@ class _LocalDocument(object):
         if self._fn:
             with open(self._fn, 'w') as fd:
                 json.dump(self._dict_object, fd)
+    def close(self):
+        self.persist()
 
 class LocalConfiguration(Configuration):
     def __init__(self, path=None):
@@ -71,13 +73,35 @@ class LocalConfiguration(Configuration):
             self._dir = os.path.abspath(path)
         else:
             self._dir = None
+        self._docs = {}
 
     def __getattr__(self, key):
+        if key in self._docs:
+            return self._docs[key]
+
         if self._dir:
             fn = os.path.join(self._dir, key)
-            return _LocalDocument(fn)
+            self._docs[key] = _LocalDocument(fn)
         else:
-            return _LocalDocument()
+            self._docs[key] = _LocalDocument()
+        return self._docs[key]
 
     def __getitem__(self, item):
         return self.__getattr__(item)
+
+    def close(self):
+        for doc in self._docs.values():
+            doc.close()
+
+    def persist(self):
+        for doc in self._docs.values():
+            doc.persist()
+
+    def reload(self):
+        if self._dir:
+            for key in self._docs:
+                fn = os.path.join(self._dir, key)
+                self._docs[key] = _LocalDocument(fn)
+        else:
+            for key in self._docs:
+                self._docs[key] = _LocalDocument()
