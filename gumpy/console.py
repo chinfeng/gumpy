@@ -17,11 +17,9 @@ class GumCmd(Cmd):
         self.prompt = '>>> '
 
     def do_EOF(self, line):
-        self._framework.close()
         return True
 
     def do_exit(self, line):
-        self._framework.close()
         return True
 
     def do_repo(self, line):

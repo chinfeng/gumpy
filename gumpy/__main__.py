@@ -38,7 +38,10 @@ def main():
         t = threading.Thread(target=_framework_loop, args=(fmk, ))
         t.setDaemon(True)
         t.start()
-    cmd.cmdloop()
+    try:
+        cmd.cmdloop()
+    finally:
+        fmk.close()
 
 if __name__ == '__main__':
     main()
