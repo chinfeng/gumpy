@@ -116,21 +116,56 @@ class _GeneratorFuture(_BaseFuture):
         else:
             self._done_callbacks.append((fn, args, kwds))
 
+class _TaskFuture(_BaseFuture):
+    def __init__(self, executor):
+        super(self.__class__, self).__init__(executor)
+        self._last_result = None
+        self._got = False
+    def result(self):
+        while not self._done:
+            self._executor.step()
+            if self._got:
+                self._got = False
+                yield self._last_result
+    def wait(self):
+        self.result()
+    def send_result(self, result):
+        if not self._done:
+            if type(result) is StopIteration or result is StopIteration:
+                self._done = True
+                for fn, args, kwds in self._done_callbacks:
+                    self._executor.submit(fn, self._last_result, *args, **kwds)
+            else:
+                self._last_result = result
+                self._got = True
+        else:
+            raise RuntimeError('cannot send result after done.')
+    def __iter__(self):
+        while True:
+            yield self.result()
+    def add_done_callback(self, fn, *args, **kwds):
+        if self.is_done():
+            self._executor.submit(fn, self._last_result, *args, **kwds)
+        else:
+            self._done_callbacks.append((fn, args, kwds))
+
 class _Executor(object):
     def __init__(self):
         self._tasks = collections.deque()
         self._incoming_evt = threading.Event()
     def _generator_wrapper(self, fn, args, kwds):
         yield fn(*args, **kwds)
-    def _submit(self, fn, exclusive, args, kwds):
-        if isgeneratorfunction(fn):
-            f = _GeneratorFuture(self)
-            self._tasks.append((fn(*args, **kwds), f, exclusive))
-        else:
-            f = _GeneralFuture(self)
-            self._tasks.append((self._generator_wrapper(fn, args, kwds), f, exclusive))
+    def _append_task(self, gen, future, exclusive):
+        self._tasks.append((gen, future, exclusive))
         self._incoming_evt.set()
-        return f
+        return future
+    def _submit(self, fn, exclusive, args, kwds):
+        if isinstance(fn, Task):
+            return self._append_task(fn(*args, **kwds), _TaskFuture(self), False)
+        elif isgeneratorfunction(fn):
+            return self._append_task((fn(*args, **kwds), _GeneratorFuture(self), exclusive))
+        else:
+            return self._append_task(self._generator_wrapper(fn, args, kwds), _GeneralFuture(self), exclusive)
     def submit(self, fn, *args, **kwds):
         return self._submit(fn, False, args, kwds)
     def exclusive_submit(self, fn, *args, **kwds):
@@ -315,11 +350,21 @@ class Task(object):
         self._instance = instance
     def __call__(self, *args, **kwds):
         method = types.MethodType(self._fn, self._instance)
-        return method(*args, **kwds)
+        if isgeneratorfunction(method):
+            for n in method(*args, **kwds):
+                yield n
+        else:
+            yield method(*args, **kwds)
     def spawn(self, *args, **kwds):
+        method = types.MethodType(self._fn, self._instance)
         if hasattr(self._instance, '__executor__'):
-            method = types.MethodType(self._fn, self._instance)
-            return self._instance.__executor__.submit(method, *args, **kwds)
+            extr = self._instance.__executor__
+        else:
+            extr = kwds.pop('__executor__', None)
+        if extr:
+            extr.submit(method, *args, **kwds)
+        else:
+            raise RuntimeError('no executor specify for {0}'.format(self._fn.__name__))
 
 class Consumer(object):
     def __init__(self, instance, bind_fn, unbind_fn, resource_uri, cardinality):

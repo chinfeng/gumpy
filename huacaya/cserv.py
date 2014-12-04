@@ -2,18 +2,20 @@
 __author__ = 'chinfeng'
 
 import functools
+import traceback
 import wsgiref.simple_server, wsgiref.util, wsgiref.validate
-from gumpy.deco import service, configuration, bind, event
+from gumpy.deco import service, configuration, bind, event, task
 
 import logging
 logger = logging.getLogger(__name__)
 
 class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
     def __init__(self, executor, *args, **kwds):
-        super(self.__class__, self).__init__(*args, **kwds)
+        wsgiref.simple_server.WSGIServer.__init__(self, *args, **kwds)
         self._executor = executor
 
-    def process_request_thread(self, request, client_address):
+    @task
+    def process_request_task(self, request, client_address):
         try:
             self.finish_request(request, client_address)
             self.shutdown_request(request)
@@ -22,11 +24,11 @@ class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
             self.shutdown_request(request)
 
     def process_request(self, request, client_address):
-        self._executor.submit(self.process_request_thread, request, client_address)
+        self.process_request_task.spawn(request, client_address, __executor__=self._executor)
 
     def serve_forever(self, *args):
         from threading import Thread
-        t = Thread(target=super(self.__class__, self).serve_forever)
+        t = Thread(target=wsgiref.simple_server.WSGIServer.serve_forever, args=(self, ))
         t.setDaemon(True)
         t.start()
 
@@ -48,6 +50,7 @@ class WSGIService(object):
             )
             self._server.serve_forever()
         except BaseException as err:
+            traceback.print_exc()
             err.args = ('tserv start fails.', ) + err.args
             logger.exception(err)
 
