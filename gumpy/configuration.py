@@ -48,6 +48,8 @@ class _LocalDocument(object):
         self.__setattr__(key, value)
     def __getitem__(self, item):
         return self.__getattr__(item)
+    def pop(self, key):
+        return self._dict_object.pop(key)
     def get(self, key, default=None):
         return self._dict_object.get(key, default)
     def set(self, key, value):

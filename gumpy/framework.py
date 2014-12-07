@@ -844,6 +844,7 @@ class Framework(object):
 
     def restore_state(self):
         uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
+        invalid_uris = set()
         for uri, start in self._state_conf.items():
             try:
                 if uri not in uri_dict:
@@ -855,6 +856,9 @@ class Framework(object):
             except BaseException as err:
                 err.args = ('bundle {0} init error:'.format(uri), ) + err.args
                 logger.exception(err)
+                invalid_uris.add(uri)
+        for uri in invalid_uris:
+            self._state_conf.pop(uri)
 
     def close(self):
         for bdl in self.bundles.values():
