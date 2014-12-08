@@ -511,12 +511,25 @@ class ServiceReference(object):
 
     def start(self):
         if not self._instance:
-            instance = self._cls.__new__(self._cls)
-            instance.__context__ = self.__context__
-            instance.__framework__ = self.__framework__
-            instance.__executor__ = self.__executor__
-            instance.__reference__ = self
-            instance.__init__()
+            if isinstance(self._cls, type):
+                instance = self._cls.__new__(self._cls)
+                instance.__context__ = self.__context__
+                instance.__framework__ = self.__framework__
+                instance.__executor__ = self.__executor__
+                instance.__reference__ = self
+                instance.__init__()
+            elif isinstance(self._cls, types.FunctionType):
+                kwds = {}
+                varnames = self._cls.__code__.co_varnames
+                if '__context__' in varnames:
+                    kwds['__context__'] = self.__context__
+                if '__framework__' in varnames:
+                    kwds['__framework__'] = self.__framework__
+                if '__executor__' in varnames:
+                    kwds['__executor__'] = self.__executor__
+                if '__reference__' in varnames:
+                    kwds['__reference__'] = self
+                instance = self._cls(**kwds)
             instance_dir = _subtract_dir(instance, object)
             if 'on_start' in instance_dir:
                 instance.on_start()
