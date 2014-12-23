@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 __author__ = 'chinfeng'
 
-import random
 import uuid
 try:
     from urlparse import urlparse, parse_qs
@@ -10,15 +9,30 @@ except ImportError:
 from tests.wsgi import WSGITestCase
 
 class OAuthTestCase(WSGITestCase):
-    def setUp(self):
-        from huacaya.storage import mock
+    def get_app(self):
         from huacaya.auth import Server, Provider, ServerDaoWithStorage
+        from huacaya.auth import EndpointApplication
+        from huacaya.storage import mock
+        from tornado.wsgi import WSGIAdapter
 
         self._storage = mock.Storage()
         serv_dao = ServerDaoWithStorage(self._storage)
         self._serv = Server(serv_dao)
         self._provider = Provider(self._serv)
+        return WSGIAdapter(
+            EndpointApplication(self._serv, self._provider)
+        )
 
+    # def setUp(self):
+    #     super(self.__class__, self).setUp()
+    #     from huacaya.storage import mock
+    #     from huacaya.auth import Server, Provider, ServerDaoWithStorage
+    #
+    #     self._storage = mock.Storage()
+    #     serv_dao = ServerDaoWithStorage(self._storage)
+    #     self._serv = Server(serv_dao)
+    #     self._provider = Provider(self._serv)
+    #
     def test_oauth_native(self):
         """ OAuth interface native test """
         from huacaya.auth import RegisterError, InvalidTokenError, AuthorizationError
@@ -66,7 +80,7 @@ class OAuthTestCase(WSGITestCase):
         self.assertFalse(serv.verify_token(access_token))
         with self.assertRaises(AuthorizationError):
             provider.authorization_grant(authorization_code, None)
-        
+
         access_token = provider.refresh_grant(refresh_token)
         self.assertTrue(serv.verify_token(access_token))
 
@@ -79,13 +93,6 @@ class OAuthTestCase(WSGITestCase):
 
     def test_api(self):
         """ Authorize grant redirect flow test """
-        from huacaya.auth import EndpointApplication
-        from tornado.wsgi import WSGIAdapter
-        self._ep_app = WSGIAdapter(
-            EndpointApplication(self._serv, self._provider)
-        )
-
-        app = self._ep_app
         serv = self._serv
 
         client_id = uuid.uuid4().hex
@@ -99,85 +106,90 @@ class OAuthTestCase(WSGITestCase):
 
         # user signup
         resp = self.request(
-            app, '/signup', method='POST',
+            '/signup', method='POST',
             data=dict(username=username, password=password)
         )
-        self.assertEqual(resp.status, '200 OK')
+        self.assertEqual('200 OK', resp.status)
         self.assertIn('userid', resp.dct)
 
         # request grant by registered client
         resp = self.request(
-            app, '/authorize', method='POST',
+            '/authorize', method='POST',
             data=dict(client_id=client_id)
         )
-        self.assertEqual(resp.status, '200 OK')
+        self.assertEqual('200 OK', resp.status)
         self.assertIn('code', resp.dct)
         authorization_code = resp.dct['code']
 
         # request grant by unregistered client
         resp = self.request(
-            app, '/authorize', method='POST',
+            '/authorize', method='POST',
             data=dict(client_id=uuid.uuid4().hex),
         )
         self.assertEqual(resp.status, '403 Forbidden')
 
         # grant access token by valid authorization_code
         resp = self.request(
-            app, '/grant', method='POST',
+            '/grant', method='POST',
             data=dict(code=authorization_code, credentials=credentials)
         )
+        self.assertEqual('200 OK', resp.status)
         self.assertIn('access_token', resp.dct)
         self.assertIn('refresh_token', resp.dct)
         access_token, refresh_token = resp.dct['access_token'], resp.dct['refresh_token']
 
         # grant access token by invalid authorization_code
         resp = self.request(
-            app, '/grant', method='POST',
+            '/grant', method='POST',
             data=dict(code=uuid.uuid4().hex, credentials=credentials)
         )
         self.assertEqual('403 Forbidden', resp.status)
 
         # grant access token by invalid credentials
         resp = self.request(
-            app, '/grant', method='POST',
+            '/grant', method='POST',
             data=dict(code=authorization_code, credentials=invlid_credentials)
         )
         self.assertEqual('403 Forbidden', resp.status)
 
         # get account resource
         resp = self.request(
-            app, '/me', method='GET',
-            headers=[('Authorization', 'Bearer {0}'.format(access_token)), ]
+            '/me', method='GET',
+            headers={'Authorization': 'Bearer {0}'.format(access_token)}
         )
+        self.assertEqual('200 OK', resp.status)
         self.assertEqual(resp.dct['username'], username)
         self.assertIn('userid', resp.dct)
         self.assertNotIn('password', resp.dct)
 
         # revoke access token
-        self.request(
-            app, '/revoke', method='POST',
+        resp = self.request(
+            '/revoke', method='POST',
             data=dict(token=access_token)
         )
+        self.assertEqual('200 OK', resp.status)
         resp = self.request(
-            app, '/me', method='GET',
-            headers=[('Authorization', 'Bearer {0}'.format(access_token)), ]
+            '/me', method='GET',
+            headers={'Authorization': 'Bearer {0}'.format(access_token)}
         )
         self.assertEqual('401 Unauthorized', resp.status)
 
         # refresh grant
         resp = self.request(
-            app, '/refresh', method='POST',
+            '/refresh', method='POST',
             data=dict(refresh_token=refresh_token)
         )
+        self.assertEqual('200 OK', resp.status)
         self.assertIn('access_token', resp.dct)
 
         # revoke refresh token
-        self.request(
-            app, '/revoke', method='POST',
+        resp = self.request(
+            '/revoke', method='POST',
             data=dict(token=refresh_token)
         )
+        self.assertEqual('200 OK', resp.status)
         resp = self.request(
-            app, '/refresh', method='POST',
+            '/refresh', method='POST',
             data=dict(refresh_token=refresh_token)
         )
         self.assertEqual('401 Unauthorized', resp.status)

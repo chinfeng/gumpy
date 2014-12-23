@@ -24,15 +24,19 @@ class Bucket(BucketBase):
         self._storage.delete(self._name)
 
     def put_object(self, key, content, metadata=None):
+        key = key.encode('utf-8') if isinstance(key, str) else key
         self._db[key] = pickle.dumps((metadata, content))
 
     def get_object(self, key):
+        key = key.encode('utf-8') if isinstance(key, str) else key
         return pickle.loads(self._db[key])
 
     def delete_object(self, key):
+        key = key.encode('utf-8') if isinstance(key, str) else key
         del self._db[key]
 
     def get_object_content(self, key):
+        key = key.encode('utf-8') if isinstance(key, str) else key
         return self.get_object(key)[1]
 
     def find(self, fields):
@@ -52,13 +56,14 @@ class Bucket(BucketBase):
         return self.get_object_content(item)
 
     def __contains__(self, item):
+        item = item.encode('utf-8') if isinstance(item, str) else item
         return item in self._db
 
     def __iter__(self):
-        return iter(self._db.keys())
+        return iter((key.decode('utf-8') for key in self._db.keys()))
 
     def keys(self):
-        return self._db.keys()
+        return [key.decode('utf-8') for key in self._db.keys()]
 
 class Storage(StorageBase):
     def __init__(self, path=None):

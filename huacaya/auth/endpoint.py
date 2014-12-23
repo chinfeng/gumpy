@@ -24,14 +24,14 @@ class MainHandler(BaseHandler):
 
 class SignUpHandler(BaseHandler):
     def post(self):
-        data = json.loads(self.request.body)
+        data = json.loads(self.request.body.decode('utf-8'))
         userid = self._auth_server.register_account(data)
         self.write(dict(userid=userid))
 
 class AuthorizeHandler(BaseHandler):
     def post(self):
-        data = json.loads(self.request.body)
-        client_id = data['client_id'].encode('utf-8')
+        data = json.loads(self.request.body.decode('utf-8'))
+        client_id = data['client_id']
         authorization_code = self._auth_provider.authorization_request(client_id)
         if authorization_code:
             self.write(dict(code=authorization_code))
@@ -40,8 +40,8 @@ class AuthorizeHandler(BaseHandler):
 
 class GrantHandler(BaseHandler):
     def post(self):
-        data = json.loads(self.request.body)
-        code = data['code'].encode('utf-8')
+        data = json.loads(self.request.body.decode('utf-8'))
+        code = data['code']
         try:
             at, rt = self._auth_provider.authorization_grant(code, data['credentials'])
             self.write(dict(
@@ -53,8 +53,8 @@ class GrantHandler(BaseHandler):
 class RevokeTokenHandler(BaseHandler):
     """ TODO: demonstration without any permission check for now """
     def post(self):
-        data = json.loads(self.request.body)
-        token = data.get('token').encode('utf-8')
+        data = json.loads(self.request.body.decode('utf-8'))
+        token = data.get('token')
         self._auth_server.revoke_token(token)
         self.write({})
 
@@ -84,8 +84,8 @@ class AccountInfoHandler(BaseHandler):
 
 class RefreshGrantHandler(BaseHandler):
     def post(self):
-        data = json.loads(self.request.body)
-        refresh_token = data.get('refresh_token').encode('utf-8')
+        data = json.loads(self.request.body.decode('utf-8'))
+        refresh_token = data.get('refresh_token')
         try:
             access_token = self._auth_provider.refresh_grant(refresh_token)
             self.write(dict(access_token=access_token))

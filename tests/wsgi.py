@@ -3,100 +3,65 @@ __author__ = 'chinfeng'
 
 try:
     from StringIO import StringIO
-except:
+except ImportError:
     from io import StringIO
-import re
-import json
-import unittest
-from wsgiref.util import setup_testing_defaults
-from wsgiref.headers import Headers
 try:
     from urllib import urlencode
 except ImportError:
     from urllib.parse import urlencode
+try:
+    from cookielib import CookieJar
+except ImportError:
+    from http.cookiejar import CookieJar
+try:
+    from urllib2 import build_opener, Request, HTTPError, HTTPCookieProcessor
+except ImportError:
+    from urllib.request import build_opener, Request, HTTPCookieProcessor
+    from urllib.error import HTTPError
 
-class _Response(object):
-    def __init__(self):
-        self.status = None
-        self.started = False
-        self.headers = None
-        self.data = bytes()
-        self._dct = None
-        self.charset = 'utf-8'
-
-    @property
-    def dct(self):
-        if not self._dct:
-            try:
-                charset = re.match(
-                    '.*charset=(.*)$',
-                    self.headers.get_all('content-type')[0]
-                ).group(1)
-                self._dct = json.loads(self.data.decode(charset))
-            except:
-                self._dct = {}
-        return self._dct
-
-    def write(self, chunk):
-        self.data += chunk
-
+import json
+import random
+import unittest
+import threading
+from wsgiref.validate import validator
+from wsgiref.simple_server import make_server
 
 class WSGITestCase(unittest.TestCase):
     def __init__(self, *args, **kwds):
         unittest.TestCase.__init__(self, *args, **kwds)
-        self.cookies = []
+        self._cookie_jar = CookieJar()
+        app = self.get_app()
+        validator(app)
+        self._port = random.randint(50000, 60000)
+        self._httpd = make_server('', self._port, app)
+        self._serve_thread = threading.Thread(target=self._httpd.serve_forever)
+        self._serve_thread.setDaemon(True)
 
-    def request(self, app, url, method='GET',
-                content_type='json', data='', cookies=None, headers=None):
-        response = _Response()
-        if isinstance(data, dict):
-            if method == 'GET':
-                url = '?'.join((url, urlencode(data)))
-                data = ''
-                content_type = ''
-            elif content_type in ('application/json', 'json'):
-                content_type = 'application/json'
-                data = json.dumps(data)
-            elif content_type in ('application/x-www-form-urlencoded', 'form'):
-                content_type = 'application/x-www-form-urlencoded'
-                data = urlencode(data)
-        data_io = StringIO(data)
-        method = 'POST' if data and method == 'GET' else method
-        environ = {
-            'PATH_INFO': url,
-            'REQUEST_METHOD': method,
-            'CONTENT_TYPE': content_type,
-            'CONTENT_LENGTH': len(data) if data else 0,
-            'wsgi.input': data_io,
-        }
-        for k, v in headers or []:
-            environ['HTTP_{0}'.format(k)] = v
-        setup_testing_defaults(environ)
-        if self.cookies:
-            environ['HTTP_COOKIE'] = ';'.join(self.cookies)
+        self._cookies = {}
 
-        start_response = lambda status, header, _resp=response: self._start_response(_resp, status, header)
-        for ret in app(environ, start_response):
-            assert response.started
-            response.write(ret)
-        data_io.close()
+    def setUp(self):
+        self._serve_thread.start()
+
+    def tearDown(self):
+        self._httpd.shutdown()
+        self._serve_thread.join()
+
+    def get_app(self):
+        raise NotImplementedError
+
+    def request(self, url, method='GET', data=None, headers=None):
+        headers = headers or {}
+        data = json.dumps(data).encode('utf-8') if isinstance(data, dict) else data
+        opener = build_opener(HTTPCookieProcessor(self._cookie_jar))
+        request = Request('http://localhost:%d%s' % (self._port, url), data=data, headers=headers)
+        if method.upper() not in ('GET', 'POST'):
+            request.get_method = lambda m=method: m
+        try:
+            response = opener.open(request)
+            charset = response.headers.get_charset() or 'UTF-8'
+            response.dct = json.loads(response.read().decode(charset))
+        except HTTPError as err:
+            response = err
+            response.dct = {}
+        response.status = '%d %s' % (response.code, response.msg)
         return response
-
-    def _start_response(self, response, status, headers):
-        assert not response.started
-        response.started = True
-        response.status = status
-        for header in headers:
-            if header[0] == 'Set-Cookie':
-                v = header[1].split(';', 1)
-                if len(v) > 1 and v[1].startswith(' Max-Age='):
-                    if int(v[1][9:]) > 0:
-                        self.cookies.append(v[0])
-                    else:
-                        index = self.cookies.index(v[0])
-                        self.cookies.pop(index)
-        response.headers = Headers(headers)
-
-    def clear_cookies(self):
-        self.cookies = []
-
