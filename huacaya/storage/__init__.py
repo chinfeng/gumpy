@@ -4,7 +4,7 @@ __author__ = 'chinfeng'
 __gum__ = 'storage'
 
 import os, sys
-from storage.mock import Storage
+from .mock import Storage
 from gumpy.deco import service, provide
 
 @service

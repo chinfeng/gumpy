@@ -55,7 +55,7 @@ class Bucket(BucketBase):
         return item in self._db
 
     def __iter__(self):
-        return iter(self._db)
+        return iter(self._db.keys())
 
     def keys(self):
         return self._db.keys()
