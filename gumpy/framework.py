@@ -175,7 +175,7 @@ class _Executor(object):
             gen, f, exclusive = self._tasks.popleft()
         except IndexError:
             self._incoming_evt.clear()
-            return
+            return False
         try:
             f.send_result(next(gen))
             if exclusive:
@@ -186,10 +186,10 @@ class _Executor(object):
             f.send_result(StopIteration)
         except BaseException as err:
             f.set_exception(err)
+        return True
     def join(self):
-        while self._tasks:
-            self.wait_until_active()
-            self.step()
+        while self.step():
+            pass
     def is_idle(self):
         return not bool(self._tasks)
     def wait_until_active(self):
