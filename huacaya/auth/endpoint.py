@@ -6,6 +6,16 @@ import uuid
 import json
 import datetime
 import tornado.web
+try:
+    from urllib import urlencode
+    from urlparse import urlsplit, urlunsplit
+except ImportError:
+    from urllib.parse import urlencode, urlsplit, urlunsplit
+
+import logging
+logger = logging.getLogger(__name__)
+
+from .auth import AuthorizationError, InvalidTokenError
 
 def json_default(obj):
     if isinstance(obj, datetime.datetime):
@@ -17,48 +27,62 @@ class BaseHandler(tornado.web.RequestHandler):
     def initialize(self, **kwds):
         self._auth_server = kwds.get('auth_server', None)
         self._auth_provider = kwds.get('auth_provider', None)
+    def write_error(self, status_code, **kwds):
+        self.write(kwds)
 
 class MainHandler(BaseHandler):
+    __route__ = r'/?'
     def get(self):
         self.redirect('/auth/index.html')
 
 class SignUpHandler(BaseHandler):
+    __route__ = r'/signup'
     def post(self):
         data = json.loads(self.request.body.decode('utf-8'))
-        userid = self._auth_server.register_account(data)
-        self.write(dict(userid=userid))
-
-class AuthorizeHandler(BaseHandler):
-    def post(self):
-        data = json.loads(self.request.body.decode('utf-8'))
-        client_id = data['client_id']
-        authorization_code = self._auth_provider.authorization_request(client_id)
-        if authorization_code:
-            self.write(dict(code=authorization_code))
-        else:
-            self.send_error(403)
-
-class GrantHandler(BaseHandler):
-    def post(self):
-        data = json.loads(self.request.body.decode('utf-8'))
-        code = data['code']
-        try:
-            at, rt = self._auth_provider.authorization_grant(code, data['credentials'])
-            self.write(dict(
-                access_token=at, refresh_token=rt
-            ))
-        except:
-            self.send_error(403)
+        account_id = self._auth_server.register_account(data)
+        self.write(dict(account_id=account_id))
 
 class RevokeTokenHandler(BaseHandler):
     """ TODO: demonstration without any permission check for now """
+    __route__ = r'/revoke'
     def post(self):
         data = json.loads(self.request.body.decode('utf-8'))
         token = data.get('token')
         self._auth_server.revoke_token(token)
         self.write({})
 
+class AccountListHandler(BaseHandler):
+    __route__ = r'/accounts'
+    def get(self):
+        """ # TODO: demonstration with simple access control fornow """
+        if self.request.remote_ip == '127.0.0.1':
+            self.set_header('Content-Type', 'application/json')
+            self.write(json.dumps(list(self._auth_server.get_accounts())))
+        else:
+            self.send_error(403)
+
+class TokenListHandler(BaseHandler):
+    __route__ = r'/tokens'
+    def get(self):
+        """ # TODO: demonstration with simple access control fornow """
+        if self.request.remote_ip == '127.0.0.1':
+            self.set_header('Content-Type', 'application/json')
+            self.write(json.dumps(list(self._auth_server.get_tokens()), default=json_default))
+        else:
+            self.send_error(403)
+
+class ClientListHandler(BaseHandler):
+    __route__ = r'/clients'
+    def get(self):
+        """ # TODO: demonstration with simple access control fornow """
+        if self.request.remote_ip == '127.0.0.1':
+            self.set_header('Content-Type', 'application/json')
+            self.write(json.dumps(list(self._auth_server.get_clients())))
+        else:
+            self.send_error(403)
+
 class AccountInfoHandler(BaseHandler):
+    __route__ = r'/me'
     def _get_access_token(self):
         bearer_str = self.request.headers.get('Authorization', None)
         if bearer_str:
@@ -73,6 +97,7 @@ class AccountInfoHandler(BaseHandler):
         token = self._get_access_token()
         if self._auth_server.verify_token(token):
             account = self._auth_server.get_account_by_token(token)
+
             if account:
                 if 'password' in account:
                     account.pop('password')
@@ -82,43 +107,75 @@ class AccountInfoHandler(BaseHandler):
         else:
             self.send_error(401)
 
-class RefreshGrantHandler(BaseHandler):
+class AuthorizeHandler(BaseHandler):
+    __route__ = r'/authorize'
+    __auth_uri__ = r'/auth/access.html'
+
+    def get(self):
+        # Authorization Request
+        # https://tools.ietf.org/html/rfc6749#section-4.1.1
+        response_type = self.get_argument('response_type', '').lower()
+        state = self.get_argument('state', None)
+        client_id = self.get_argument('client_id', None)
+        redirect_uri = self.get_argument('redirect_uri', None)
+        if not all((response_type, client_id, response_type == 'code', redirect_uri)):
+            dct = {'error': 'invalid_request'}
+            uri = redirect_uri
+        elif not self._auth_server.has_client_id(client_id):
+            dct = {'error': 'unauthorized_client'}
+            uri = redirect_uri
+        else:
+            code = self._auth_provider.authorization_request(client_id, {'redirect_uri': redirect_uri})
+            if code:
+                dct = {'code': code, 'redirect_uri': redirect_uri}
+                uri = self.__auth_uri__
+            else:
+                dct = {'error': 'access_denied'}
+                uri = redirect_uri
+        if state:
+            dct['state'] = state
+        url_parts = list(urlsplit(uri or '/err/400'))
+        url_parts[3] = '&'.join((url_parts[3], urlencode(dct)))
+        self.redirect(urlunsplit(url_parts))
+
+class GrantHandler(BaseHandler):
+    __route__ = r'/grant'
+
     def post(self):
-        data = json.loads(self.request.body.decode('utf-8'))
-        refresh_token = data.get('refresh_token')
-        try:
-            access_token = self._auth_provider.refresh_grant(refresh_token)
-            self.write(dict(access_token=access_token))
-        except:
-            self.send_error(401)
-
-class AccountListHandler(BaseHandler):
-    def get(self):
-        """ # TODO: demonstration with simple access control fornow """
-        if self.request.remote_ip == '127.0.0.1':
-            self.set_header('Content-Type', 'application/json')
-            self.write(json.dumps(list(self._auth_server.get_accounts())))
+        grant_type = self.get_argument('grant_type', '')
+        if grant_type.lower() == 'authorization_code':
+            # Access Token Request
+            # https://tools.ietf.org/html/rfc6749#section-4.1.3
+            code = self.get_argument('code', None)
+            if code:
+                credentials = {
+                    'username': self.get_argument('username', None),
+                    'password': self.get_argument('password', None),
+                }
+                try:
+                    self.write(
+                        self._auth_provider.authorization_grant(
+                            code, credentials,
+                            {'redirect_uri': self.get_argument('redirect_uri', None)}
+                        )
+                    )
+                except AuthorizationError:
+                    self.send_error(400, error='invalid_grant')
+            else:
+                self.send_error(400, error='invalid_grant')
+        elif grant_type.lower() == 'refresh_token':
+            # Refreshing an Access Token
+            # https://tools.ietf.org/html/rfc6749#section-6
+            try:
+                self.set_header('Content-Type', 'application/json; charset=utf-8')
+                self.write(json.dumps(
+                    self._auth_provider.refresh_grant(self.get_argument('refresh_token', None)),
+                    default=json_default,
+                ))
+            except InvalidTokenError:
+                self.send_error(400, error='invalid_grant')
         else:
-            self.send_error(403)
-
-class TokenListHandler(BaseHandler):
-    def get(self):
-        """ # TODO: demonstration with simple access control fornow """
-        if self.request.remote_ip == '127.0.0.1':
-            self.set_header('Content-Type', 'application/json')
-            self.write(json.dumps(list(self._auth_server.get_tokens()), default=json_default))
-        else:
-            self.send_error(403)
-
-class ClientListHandler(BaseHandler):
-    def get(self):
-        """ # TODO: demonstration with simple access control fornow """
-        if self.request.remote_ip == '127.0.0.1':
-            self.set_header('Content-Type', 'application/json')
-            self.write(json.dumps(list(self._auth_server.get_clients())))
-        else:
-            self.send_error(403)
-
+            self.send_error(400, error='invalid_request')
 
 class EndpointApplication(tornado.web.Application):
     def __init__(self, auth_server, auth_provider):
@@ -131,20 +188,12 @@ class EndpointApplication(tornado.web.Application):
 
     def get_handlers(self, **kwds):
         handlers = [
-            (r'/?', MainHandler),
-            (r'/signup', SignUpHandler),
-            (r'/authorize', AuthorizeHandler),
-            (r'/grant', GrantHandler),
-            (r'/me', AccountInfoHandler),
-            (r'/revoke', RevokeTokenHandler),
-            (r'/refresh', RefreshGrantHandler),
-            (r'/accounts', AccountListHandler),
-            (r'/tokens', TokenListHandler),
-            (r'/clients', ClientListHandler),
+            MainHandler, SignUpHandler, AuthorizeHandler, GrantHandler, AccountInfoHandler,
+            RevokeTokenHandler, AccountListHandler, TokenListHandler, ClientListHandler,
         ]
 
         for handler in handlers:
-            yield (handler[0], handler[1], kwds)
+            yield (handler.__route__, handler, kwds)
 
         static_path = os.path.join(os.path.dirname(__file__), 'static')
         yield (r'/(.*)', tornado.web.StaticFileHandler, dict(path=static_path))

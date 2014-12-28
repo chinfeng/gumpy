@@ -9,11 +9,11 @@ class Provider(object):
     def __init__(self, server):
         self._server = server
 
-    def authorization_request(self, client_id):
-        return self._server.authorization_request(client_id)
+    def authorization_request(self, client_id, identical_data=None):
+        return self._server.authorization_request(client_id, identical_data)
 
-    def authorization_grant(self, authorization_code, credentials):
-        return self._server.authorization_grant(authorization_code, credentials)
+    def authorization_grant(self, authorization_code, credentials, identical_data=None):
+        return self._server.authorization_grant(authorization_code, credentials, identical_data)
 
     def refresh_grant(self, token):
         return self._server.refresh_grant(token)
@@ -40,52 +40,61 @@ class Server(object):
 
     def verify_token(self, token):
         if self._dao.has_token(token):
-            return self._dao.get_token(token).get('active', False)
+            return not self._dao.get_token(token).get('disabled', False)
         return False
 
     def get_account_by_token(self, token):
         return self._dao.find_account_by_token(token)
 
     def revoke_token(self, token):
-        self._dao.update_token(token, dict(active=False))
+        self._dao.update_token(token, dict(disabled=True))
 
-    def verify_authorization_code(self, code):
+    def verify_authorization_code(self, code, identical_data=None):
         if self._dao.has_authorization_code(code):
             authorization_code_data = self._dao.get_authorization_code(code)
-            sec = (datetime.datetime.now() - authorization_code_data['generated_time']).seconds
-            if authorization_code_data['active'] and sec <= authorization_code_data['expires_in']:
+            if not identical_data == authorization_code_data.get('identical_data', None):
+                return False
+            sec = (datetime.datetime.now() - authorization_code_data['issue_time']).seconds
+            if (not authorization_code_data['disabled']) and sec <= authorization_code_data['expires_in']:
                 return True
         return False
 
     def revoke_authorization_code(self, authorization_code):
-        self._dao.update_authorization_code(authorization_code, dict(active=False))
+        self._dao.update_authorization_code(authorization_code, dict(disabled=True))
 
-    def authorization_request(self, client_id):
+    def authorization_request(self, client_id, identical_data=None):
         if self._dao.has_client_id(client_id):
             authorization_code_data = {
                 'code': uuid.uuid4().hex,
-                'generated_time': datetime.datetime.now(),
-                'expires_in': 300, 'active': True,
+                'issue_time': datetime.datetime.now(),
+                'expires_in': 300,
+                'disabled': False,
+                'identical_data': identical_data,
             }
             self._dao.insert_authorization_code(authorization_code_data)
             return authorization_code_data['code']
         else:
             return None
 
-    def authorization_grant(self, authorization_code, credentials):
-        if self.verify_authorization_code(authorization_code):
+    def authorization_grant(self, authorization_code, credentials, identical_data=None):
+        if self.verify_authorization_code(authorization_code, identical_data):
             account = self._dao.find_account(credentials)
             if account:
                 refresh_token = uuid.uuid4().hex
                 refresh_token_data = {
-                    'generated_time': datetime.datetime.now(),
+                    'issue_time': datetime.datetime.now(),
                     'refresh_token': refresh_token,
-                    'userid': account['userid'],
-                    'active': True,
+                    'account_id': account['account_id'],
+                    'disabled': False,
                 }
                 self._dao.insert_token(refresh_token_data)
-                access_token = self.refresh_grant(refresh_token)
-                return access_token, refresh_token
+                access_token_data = self.refresh_grant(refresh_token)
+                return {
+                    'token_type': 'bearer',
+                    'access_token': access_token_data['access_token'],
+                    'expires_in': access_token_data['expires_in'],
+                    'refresh_token': refresh_token,
+                }
             else:
                 raise AuthorizationError('invalid user credentials')
         else:
@@ -93,17 +102,22 @@ class Server(object):
 
     def refresh_grant(self, refresh_token):
         refresh_token_data = self._dao.get_token(refresh_token)
-        if refresh_token_data and refresh_token_data.get('active', False):
+        if refresh_token_data and not refresh_token_data.get('disabled', False):
             access_token = uuid.uuid4().hex
             access_token_data = {
-                'generated_time': datetime.datetime.now(),
+                'issue_time': datetime.datetime.now(),
                 'access_token': access_token,
-                'userid': refresh_token_data['userid'],
+                'account_id': refresh_token_data['account_id'],
                 'expires_in': 86400,
-                'active': True,
+                'disabled': False,
             }
             self._dao.insert_token(access_token_data)
-            return access_token
+            return {
+                'token_type': 'bearer',
+                'access_token': access_token,
+                'expires_in': access_token_data['expires_in'],
+                'refresh_token': refresh_token,
+            }
         else:
             raise InvalidTokenError('invalid refresh token {0}'.format(refresh_token))
 
@@ -115,6 +129,9 @@ class Server(object):
 
     def get_clients(self):
         return self._dao.get_clients()
+
+    def has_client_id(self, client_id):
+        return self._dao.has_client_id(client_id)
 
 class ServerDaoWithStorage(object):
     def __init__(self, storage):
@@ -147,10 +164,10 @@ class ServerDaoWithStorage(object):
         return bool(account)
 
     def insert_account(self, account):
-        userid = uuid.uuid4().hex
-        account['userid'] = userid
-        self._accounts.put_object(userid, account)
-        return userid
+        account_id = uuid.uuid4().hex
+        account['account_id'] = account_id
+        self._accounts.put_object(account_id, account)
+        return account_id
 
     def has_authorization_code(self, authorization_code):
         return authorization_code in self._codes
@@ -162,13 +179,13 @@ class ServerDaoWithStorage(object):
         return token in self._tokens
 
     def find_account_by_token(self, token):
-        userid = self._tokens.get_object_content(token).get('userid')
-        return self._accounts.get_object_content(userid)
+        account_id = self._tokens.get_object_content(token).get('account_id')
+        return self._accounts.get_object_content(account_id)
 
     def find_account(self, data):
-        for userid in self._accounts:
-            if set(data.items()).issubset(self._accounts[userid].items()):
-                return self._accounts[userid]
+        for account_id in self._accounts:
+            if set(data.items()).issubset(self._accounts[account_id].items()):
+                return self._accounts[account_id]
         return None
 
     def update_token(self, token, param):
@@ -177,7 +194,7 @@ class ServerDaoWithStorage(object):
         self._tokens.put_object(token, token_data)
 
     def get_authorization_code(self, authorization_code):
-        return self._codes.get_object_content(authorization_code)
+        return self._codes.get_object_content(authorization_code) if authorization_code in self._codes else None
 
     def update_authorization_code(self, authorization_code, param):
         metadata, code_data = self._codes.get_object(authorization_code)
@@ -190,11 +207,11 @@ class ServerDaoWithStorage(object):
         self._tokens.put_object(token, token_data)
 
     def get_token(self, token):
-        return self._tokens.get_object_content(token)
+        return self._tokens.get_object_content(token) if token in self._tokens else None
 
     def get_accounts(self):
-        for userid in self._accounts:
-            account = self._accounts.get_object_content(userid)
+        for account_id in self._accounts:
+            account = self._accounts.get_object_content(account_id)
             if 'password' in account: account.pop('password')
             yield account
 
