@@ -2,11 +2,14 @@
 __author__ = 'chinfeng'
 
 import uuid
+
 try:
     from urlparse import urlparse, parse_qs
+    from urllib import urlencode
 except ImportError:
-    from urllib.parse import urlparse, parse_qs
+    from urllib.parse import urlparse, parse_qs, urlencode
 from tests.wsgi import WSGITestCase
+
 
 class OAuthTestCase(WSGITestCase):
     def get_app(self):
@@ -23,16 +26,6 @@ class OAuthTestCase(WSGITestCase):
             EndpointApplication(self._serv, self._provider)
         )
 
-    # def setUp(self):
-    #     super(self.__class__, self).setUp()
-    #     from huacaya.storage import mock
-    #     from huacaya.auth import Server, Provider, ServerDaoWithStorage
-    #
-    #     self._storage = mock.Storage()
-    #     serv_dao = ServerDaoWithStorage(self._storage)
-    #     self._serv = Server(serv_dao)
-    #     self._provider = Provider(self._serv)
-    #
     def test_oauth_native(self):
         """ OAuth interface native test """
         from huacaya.auth import RegisterError, InvalidTokenError, AuthorizationError
@@ -57,7 +50,8 @@ class OAuthTestCase(WSGITestCase):
 
         # test user authorization
         credentials = {'username': username, 'password': password}
-        access_token, refresh_token = provider.authorization_grant(authorization_code, credentials)
+        token_data = provider.authorization_grant(authorization_code, credentials)
+        access_token, refresh_token = token_data['access_token'], token_data['refresh_token']
         self.assertTrue(serv.verify_token(access_token))
         self.assertTrue(serv.verify_token(refresh_token))
         with self.assertRaises(AuthorizationError):
@@ -81,8 +75,8 @@ class OAuthTestCase(WSGITestCase):
         with self.assertRaises(AuthorizationError):
             provider.authorization_grant(authorization_code, None)
 
-        access_token = provider.refresh_grant(refresh_token)
-        self.assertTrue(serv.verify_token(access_token))
+        token_data = provider.refresh_grant(refresh_token)
+        self.assertTrue(serv.verify_token(token_data['access_token']))
 
         serv.revoke_token(access_token)
         serv.revoke_token(refresh_token)
@@ -91,105 +85,228 @@ class OAuthTestCase(WSGITestCase):
         with self.assertRaises(InvalidTokenError):
             provider.refresh_grant(refresh_token)
 
-    def test_api(self):
-        """ Authorize grant redirect flow test """
-        serv = self._serv
+    def test_authorization_code_grant(self):
+        """授权码三段验证
+        http://tools.ietf.org/html/rfc6749#section-4.1
+        基于重定向的页面流，为三方客户端提供 access_token 和 refresh_token 的授权
+        +----------+
+        | Resource |
+        |   Owner  |
+        |          |
+        +----------+
+             ^
+             |
+            (B)
+        +----|-----+          Client Identifier      +---------------+
+        |         -+----(A)-- & Redirection URI ---->|               |
+        |  User-   |                                 | Authorization |
+        |  Agent  -+----(B)-- User authenticates --->|     Server    |
+        |          |                                 |               |
+        |         -+----(C)-- Authorization Code ---<|               |
+        +-|----|---+                                 +---------------+
+          |    |                                         ^      v
+        (A)  (C)                                        |      |
+          |    |                                         |      |
+          ^    v                                         |      |
+        +---------+                                      |      |
+        |         |>---(D)-- Authorization Code ---------'      |
+        |  Client |          & Redirection URI                  |
+        |         |                                             |
+        |         |<---(E)----- Access Token -------------------'
+        +---------+       (w/ Optional Refresh Token)
+        """
 
+        # 授信一个客户端
+        server = self._serv
         client_id = uuid.uuid4().hex
-        serv.register_client(client_id)
+        server.register_client(client_id)
 
-        username = uuid.uuid4().hex
-        password = uuid.uuid4().hex
+        credentials = {'username': uuid.uuid4().hex, 'password': uuid.uuid4().hex, 'other': uuid.uuid4().hex}
 
-        credentials = {'username': username, 'password': password}
-        invlid_credentials = {'username': uuid.uuid4().hex, 'password': ''}
-
-        # user signup
+        # 注册一个用户
         resp = self.request(
-            '/signup', method='POST',
-            data=dict(username=username, password=password)
+            '/signup', headers={'Content-Type': 'application/json'}, data=credentials
         )
-        self.assertEqual('200 OK', resp.status)
-        self.assertIn('userid', resp.dct)
+        self.assertEqual(200, resp.code)
+        self.assertIn('account_id', resp.dct)
 
-        # request grant by registered client
-        resp = self.request(
-            '/authorize', method='POST',
-            data=dict(client_id=client_id)
-        )
-        self.assertEqual('200 OK', resp.status)
-        self.assertIn('code', resp.dct)
-        authorization_code = resp.dct['code']
+        # User-agent 发起请求
+        # End point 页面请求接收参数，返回 authorization code
+        auth_request_mock_data = {
+            'response_type': 'code',
+            'client_id': client_id,
+            'redirect_uri': 'http://www.other.com',
+            'state': 'xyz',
+        }
 
-        # request grant by unregistered client
-        resp = self.request(
-            '/authorize', method='POST',
-            data=dict(client_id=uuid.uuid4().hex),
-        )
-        self.assertEqual(resp.status, '403 Forbidden')
+        # 负面测试数据
+        invalid_client_auth_request_mock_data = auth_request_mock_data.copy()
+        invalid_client_auth_request_mock_data['client_id'] = uuid.uuid4().hex
 
-        # grant access token by valid authorization_code
+        invalid_type_auth_request_mock_data = auth_request_mock_data.copy()
+        invalid_type_auth_request_mock_data['response_type'] = uuid.uuid4().hex
+
+        # 完成图中 (A)(B)(C) 步骤，返回 redirect_uri 的重定向
+        # 此接口主要验证 client 合法性
         resp = self.request(
-            '/grant', method='POST',
-            data=dict(code=authorization_code, credentials=credentials)
+            '/authorize', data=auth_request_mock_data,
         )
-        self.assertEqual('200 OK', resp.status)
+        self.assertEqual(302, resp.code)
+        location = urlparse(resp.headers['Location'])
+        qdct = parse_qs(location.query)
+        self.assertEqual('/auth/access.html', location.path)    # 返回认证服务器 Endpoint 页面
+        self.assertIn('code', qdct)
+        authorization_code = qdct['code'][0]   # 获得合法的请求码
+        self.assertEqual('xyz', qdct['state'][0])
+
+        # 无效 client，返回 error
+        resp = self.request(
+            '/authorize', data=invalid_client_auth_request_mock_data,
+        )
+        self.assertEqual(302, resp.code)
+        location = urlparse(resp.headers['Location'])
+        qdct = parse_qs(location.query)
+        self.assertIn('unauthorized_client', qdct['error'])
+        self.assertTrue(
+            resp.headers['Location'].startswith(
+                auth_request_mock_data['redirect_uri']
+            )
+        )
+        self.assertEqual('xyz', qdct['state'][0])
+
+        # 无效 response_type，返回 error
+        resp = self.request(
+            '/authorize', data=invalid_type_auth_request_mock_data,
+        )
+        self.assertEqual(302, resp.code)
+        location = urlparse(resp.headers['Location'])
+        qdct = parse_qs(location.query)
+        self.assertTrue(
+            resp.headers['Location'].startswith(
+                auth_request_mock_data['redirect_uri']
+            )
+        )
+        self.assertIn('invalid_request', qdct['error'])
+        self.assertEqual('xyz', qdct['state'][0])
+
+        # 参数不完整，返回 error
+        resp = self.request(
+            '/authorize', data={'client_id': 'abc'},
+        )
+        self.assertEqual(302, resp.code)
+        location = urlparse(resp.headers['Location'])
+        qdct = parse_qs(location.query)
+        self.assertIn('invalid_request', qdct['error'])
+
+        # 完成图中 (D)(E) 步骤， /auth/access.html，用户操作后提交数据
+        # 此接口为 Authorization Server 的用户认证页面使用，
+        # 附加 user authenticates，由本服务器产生
+        # 返回 redirect_uri，给三方 client 附上 access、refresh 两个 token
+        # 注：
+        #   1. 暂不处理 client authentication，暂不处理公共资源下需要 client_id 的场景
+        #   2. 返回 200 获得各种信息后，再由客户端 post 到三方 redirect_uri，此处不作测试
+        access_request_mock_data = {
+            'grant_type': 'authorization_code',
+            'redirect_uri': auth_request_mock_data['redirect_uri'],    # 根据标准此项必须与上一步请求一致，否则验证失败
+            'code': authorization_code,
+            'username': credentials['username'],
+            'password': credentials['password'],
+        }
+
+        resp = self.request(
+            '/grant', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=access_request_mock_data,
+        )
+
+        self.assertEqual(200, resp.code)
+        self.assertEqual('application/json', resp.headers.get('content-type')[:16])
+        self.assertEqual('utf-8', resp.charset.lower())
         self.assertIn('access_token', resp.dct)
         self.assertIn('refresh_token', resp.dct)
-        access_token, refresh_token = resp.dct['access_token'], resp.dct['refresh_token']
+        self.assertIn('expires_in', resp.dct)
+        access_token = resp.dct['access_token']
+        refresh_token = resp.dct['refresh_token']
+        self.assertIn('bearer', resp.dct['token_type'])
 
-        # grant access token by invalid authorization_code
+        # 非法 authorization_code
+        invalid_access_request_mock_data = access_request_mock_data.copy()
+        invalid_access_request_mock_data['code'] = uuid.uuid4().hex
         resp = self.request(
-            '/grant', method='POST',
-            data=dict(code=uuid.uuid4().hex, credentials=credentials)
+            '/grant', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=invalid_access_request_mock_data,
         )
-        self.assertEqual('403 Forbidden', resp.status)
+        self.assertEqual(400, resp.code)
+        self.assertEqual('application/json', resp.headers.get('content-type')[:16])
+        self.assertEqual('invalid_grant', resp.dct['error'])
 
-        # grant access token by invalid credentials
+        # redirect_uri 不一致
+        invalid_access_request_mock_data = access_request_mock_data.copy()
+        invalid_access_request_mock_data['redirect_uri'] = uuid.uuid4().hex
         resp = self.request(
-            '/grant', method='POST',
-            data=dict(code=authorization_code, credentials=invlid_credentials)
+            '/grant', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=invalid_access_request_mock_data,
         )
-        self.assertEqual('403 Forbidden', resp.status)
+        self.assertEqual(400, resp.code)
+        self.assertEqual('application/json', resp.headers.get('content-type')[:16])
+        self.assertEqual('invalid_grant', resp.dct['error'])
 
-        # get account resource
+        # 使用 access_token 获得账户信息
         resp = self.request(
-            '/me', method='GET',
-            headers={'Authorization': 'Bearer {0}'.format(access_token)}
+            '/me', headers={'Authorization': 'Bearer ' + access_token}
         )
-        self.assertEqual('200 OK', resp.status)
-        self.assertEqual(resp.dct['username'], username)
-        self.assertIn('userid', resp.dct)
-        self.assertNotIn('password', resp.dct)
+        self.assertEqual(200, resp.code)
+        self.assertIn('account_id', resp.dct)
+        self.assertEqual(credentials['username'], resp.dct['username'])
+        self.assertEqual(credentials['other'], resp.dct['other'])
 
-        # revoke access token
+        # 使用错误的 access_token，返回 401
         resp = self.request(
-            '/revoke', method='POST',
-            data=dict(token=access_token)
+            '/me', headers={'Authorization': 'Bearer ' + uuid.uuid4().hex}
         )
-        self.assertEqual('200 OK', resp.status)
-        resp = self.request(
-            '/me', method='GET',
-            headers={'Authorization': 'Bearer {0}'.format(access_token)}
-        )
-        self.assertEqual('401 Unauthorized', resp.status)
+        self.assertEqual(401, resp.code)
 
-        # refresh grant
+        # 使用 refresh_token 获得新 access_token
+        refresh_request_mock_data = {
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token,
+        }
         resp = self.request(
-            '/refresh', method='POST',
-            data=dict(refresh_token=refresh_token)
+            '/grant', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=refresh_request_mock_data,
         )
-        self.assertEqual('200 OK', resp.status)
+        self.assertEqual(200, resp.code)
+        self.assertEqual('application/json', resp.headers.get('content-type')[:16])
+        self.assertEqual('utf-8', resp.charset.lower())
         self.assertIn('access_token', resp.dct)
+        self.assertIn(refresh_token, resp.dct['refresh_token'])
+        self.assertIn('expires_in', resp.dct)
+        self.assertIn('bearer', resp.dct['token_type'])
 
-        # revoke refresh token
+        # 使用非法 refresh_token，返回 400
+        invalid_refresh_request_mock_data = refresh_request_mock_data.copy()
+        invalid_refresh_request_mock_data['refresh_token'] = uuid.uuid4().hex
         resp = self.request(
-            '/revoke', method='POST',
-            data=dict(token=refresh_token)
+            '/grant', method='POST', headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data=invalid_refresh_request_mock_data,
         )
-        self.assertEqual('200 OK', resp.status)
-        resp = self.request(
-            '/refresh', method='POST',
-            data=dict(refresh_token=refresh_token)
-        )
-        self.assertEqual('401 Unauthorized', resp.status)
+        self.assertEqual(400, resp.code)
+        self.assertEqual('application/json', resp.headers.get('content-type')[:16])
+        self.assertEqual('invalid_grant', resp.dct['error'])
+
+    def test_implicit_grant(self):
+        # http://tools.ietf.org/html/rfc6749#section-4.2
+        # 隐式授权，公共资源
+        # TODO
+        pass
+
+    def test_owner_password_credentials_grant(self):
+        # http://tools.ietf.org/html/rfc6749#section-4.3
+        # 密码授权
+        # TODO
+        pass
+
+    def test_client_credentials_grant(self):
+        # http://tools.ietf.org/html/rfc6749#section-4.4
+        # 私有证书授权
+        # TODO
+        pass
