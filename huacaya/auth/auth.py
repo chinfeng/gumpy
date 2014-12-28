@@ -4,16 +4,20 @@ __author__ = 'chinfeng'
 import uuid
 import datetime
 from .exception import RegisterError, InvalidTokenError, AuthorizationError
+try:
+    from urlparse import urlparse
+except ImportError:
+    from urllib.parse import urlparse
 
 class Provider(object):
     def __init__(self, server):
         self._server = server
 
-    def authorization_request(self, client_id, identical_data=None):
-        return self._server.authorization_request(client_id, identical_data)
+    def authorization_request(self, client_id, redirect_uri=None):
+        return self._server.authorization_request(client_id, redirect_uri)
 
-    def authorization_grant(self, authorization_code, credentials, identical_data=None):
-        return self._server.authorization_grant(authorization_code, credentials, identical_data)
+    def authorization_grant(self, authorization_code, credentials, redirect_uri=None):
+        return self._server.authorization_grant(authorization_code, credentials, redirect_uri)
 
     def refresh_grant(self, token):
         return self._server.refresh_grant(token)
@@ -49,10 +53,10 @@ class Server(object):
     def revoke_token(self, token):
         self._dao.update_token(token, dict(disabled=True))
 
-    def verify_authorization_code(self, code, identical_data=None):
+    def verify_authorization_code(self, code, redirect_uri=None):
         if self._dao.has_authorization_code(code):
             authorization_code_data = self._dao.get_authorization_code(code)
-            if not identical_data == authorization_code_data.get('identical_data', None):
+            if not self._redirect_uri_identical(authorization_code_data.get('redirect_uri', None), redirect_uri):
                 return False
             sec = (datetime.datetime.now() - authorization_code_data['issue_time']).seconds
             if (not authorization_code_data['disabled']) and sec <= authorization_code_data['expires_in']:
@@ -62,22 +66,22 @@ class Server(object):
     def revoke_authorization_code(self, authorization_code):
         self._dao.update_authorization_code(authorization_code, dict(disabled=True))
 
-    def authorization_request(self, client_id, identical_data=None):
+    def authorization_request(self, client_id, redirect_uri=None):
         if self._dao.has_client_id(client_id):
             authorization_code_data = {
                 'code': uuid.uuid4().hex,
                 'issue_time': datetime.datetime.now(),
                 'expires_in': 300,
                 'disabled': False,
-                'identical_data': identical_data,
+                'redirect_uri': redirect_uri,
             }
             self._dao.insert_authorization_code(authorization_code_data)
             return authorization_code_data['code']
         else:
             return None
 
-    def authorization_grant(self, authorization_code, credentials, identical_data=None):
-        if self.verify_authorization_code(authorization_code, identical_data):
+    def authorization_grant(self, authorization_code, credentials, redirect_uri=None):
+        if self.verify_authorization_code(authorization_code, redirect_uri):
             account = self._dao.find_account(credentials)
             if account:
                 refresh_token = uuid.uuid4().hex
@@ -132,6 +136,14 @@ class Server(object):
 
     def has_client_id(self, client_id):
         return self._dao.has_client_id(client_id)
+
+    def _redirect_uri_identical(self, auth_redirect_uri, acc_redirect_url):
+        # TODO 鉴别两个 redirect_uri 是否同一个所有者
+        # https://tools.ietf.org/html/rfc6749#section-4.1.3
+        # 目前仅作简单处理，access_token 请求为同域名即可通过
+        auth_loc = urlparse(auth_redirect_uri or '')
+        acc_loc = urlparse(acc_redirect_url or '')
+        return auth_loc.netloc == acc_loc.netloc
 
 class ServerDaoWithStorage(object):
     def __init__(self, storage):

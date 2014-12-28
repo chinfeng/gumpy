@@ -135,7 +135,7 @@ class OAuthTestCase(WSGITestCase):
         auth_request_mock_data = {
             'response_type': 'code',
             'client_id': client_id,
-            'redirect_uri': 'http://www.other.com',
+            'redirect_uri': 'http://www.other.com/code',
             'state': 'xyz',
         }
 
@@ -154,7 +154,11 @@ class OAuthTestCase(WSGITestCase):
         self.assertEqual(302, resp.code)
         location = urlparse(resp.headers['Location'])
         qdct = parse_qs(location.query)
-        self.assertEqual('/auth/access.html', location.path)    # 返回认证服务器 Endpoint 页面
+        self.assertTrue(
+            resp.headers['Location'].startswith(
+                auth_request_mock_data['redirect_uri']
+            )
+        )
         self.assertIn('code', qdct)
         authorization_code = qdct['code'][0]   # 获得合法的请求码
         self.assertEqual('xyz', qdct['state'][0])
@@ -198,16 +202,19 @@ class OAuthTestCase(WSGITestCase):
         qdct = parse_qs(location.query)
         self.assertIn('invalid_request', qdct['error'])
 
-        # 完成图中 (D)(E) 步骤， /auth/access.html，用户操作后提交数据
+        # 完成图中 (D)(E) 步骤
         # 此接口为 Authorization Server 的用户认证页面使用，
-        # 附加 user authenticates，由本服务器产生
-        # 返回 redirect_uri，给三方 client 附上 access、refresh 两个 token
         # 注：
-        #   1. 暂不处理 client authentication，暂不处理公共资源下需要 client_id 的场景
+        #   1. 暂不处理 client authentication
         #   2. 返回 200 获得各种信息后，再由客户端 post 到三方 redirect_uri，此处不作测试
+        #   3. 规范所述，如果授权码中含有 redirect_uri，则本步骤必须提供，以验证两者是否一致，
+        #     如同域，或证书的验证，暂不实现
+        #   4. 附加 user authenticates，由本服务器的认证前端 Endpoint，不在本测试范围内
+        #   5. 返回 redirect_uri，给三方 client 附上 access、refresh 两个 token，由
+        #     user-agent 承担，不在本测试范围内
         access_request_mock_data = {
             'grant_type': 'authorization_code',
-            'redirect_uri': auth_request_mock_data['redirect_uri'],    # 根据标准此项必须与上一步请求一致，否则验证失败
+            'redirect_uri': 'http://www.other.com/token',
             'code': authorization_code,
             'username': credentials['username'],
             'password': credentials['password'],
@@ -239,7 +246,7 @@ class OAuthTestCase(WSGITestCase):
         self.assertEqual('application/json', resp.headers.get('content-type')[:16])
         self.assertEqual('invalid_grant', resp.dct['error'])
 
-        # redirect_uri 不一致
+        # redirect_uri 鉴定不一致
         invalid_access_request_mock_data = access_request_mock_data.copy()
         invalid_access_request_mock_data['redirect_uri'] = uuid.uuid4().hex
         resp = self.request(

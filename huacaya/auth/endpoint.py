@@ -109,7 +109,7 @@ class AccountInfoHandler(BaseHandler):
 
 class AuthorizeHandler(BaseHandler):
     __route__ = r'/authorize'
-    __auth_uri__ = r'/auth/access.html'
+    __default_redirect_uri__ = '/auth/default_callback'
 
     def get(self):
         # Authorization Request
@@ -120,21 +120,18 @@ class AuthorizeHandler(BaseHandler):
         redirect_uri = self.get_argument('redirect_uri', None)
         if not all((response_type, client_id, response_type == 'code', redirect_uri)):
             dct = {'error': 'invalid_request'}
-            uri = redirect_uri
         elif not self._auth_server.has_client_id(client_id):
             dct = {'error': 'unauthorized_client'}
-            uri = redirect_uri
         else:
-            code = self._auth_provider.authorization_request(client_id, {'redirect_uri': redirect_uri})
+            code = self._auth_provider.authorization_request(client_id, redirect_uri)
             if code:
                 dct = {'code': code, 'redirect_uri': redirect_uri}
-                uri = self.__auth_uri__
             else:
                 dct = {'error': 'access_denied'}
-                uri = redirect_uri
         if state:
             dct['state'] = state
-        url_parts = list(urlsplit(uri or '/err/400'))
+
+        url_parts = list(urlsplit(redirect_uri or self.__default_redirect_uri__))
         url_parts[3] = '&'.join((url_parts[3], urlencode(dct)))
         self.redirect(urlunsplit(url_parts))
 
@@ -155,8 +152,7 @@ class GrantHandler(BaseHandler):
                 try:
                     self.write(
                         self._auth_provider.authorization_grant(
-                            code, credentials,
-                            {'redirect_uri': self.get_argument('redirect_uri', None)}
+                            code, credentials, self.get_argument('redirect_uri', None)
                         )
                     )
                 except AuthorizationError:
