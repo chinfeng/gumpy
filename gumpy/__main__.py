@@ -8,12 +8,6 @@ from .console import GumCmd
 from .framework import Framework
 from .configuration import LocalConfiguration
 
-def _framework_loop(framework):
-    extr = framework.__executor__
-    while True:
-        extr.wait_until_active()
-        extr.step()
-
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -35,7 +29,7 @@ def main():
     fmk = Framework(LocalConfiguration(conf_pt), pt)
     cmd = GumCmd(fmk, pt)
     if autostep:
-        t = threading.Thread(target=_framework_loop, args=(fmk, ))
+        t = threading.Thread(target=fmk.__executor__.loop)
         t.setDaemon(True)
         t.start()
     try:

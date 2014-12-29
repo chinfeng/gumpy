@@ -11,6 +11,10 @@ try:
 except ImportError:
     import configparser
 try:
+    from Queue import Queue
+except ImportError:
+    from queue import Queue
+try:
     # 2.x
     reload
 except NameError:
@@ -46,7 +50,17 @@ class _BaseFuture(object):
     def exception(self):
         return self._exception
     def wait(self):
-        raise NotImplementedError
+        if not self.is_done():
+            if threading.current_thread().ident == self._executor.thread_ident:
+                while not self.is_done():
+                    self._executor.step()
+            else:
+                evt = threading.Event()
+                evt.clear()
+                step_hook = lambda e=evt, f=self: e.set() if f.is_done() else None
+                self._executor.add_step_hook(step_hook)
+                evt.wait()
+                self._executor.remove_step_hook(step_hook)
     def is_done(self):
         return self._done
     def add_done_callback(self, fn, *args, **kwds):
@@ -60,15 +74,11 @@ class _GeneralFuture(_BaseFuture):
         super(self.__class__, self).__init__(executor)
         self._result = None
     def result(self):
-        while not self._done:
-            self._executor.step()
+        self.wait()
         if self._exception:
             raise self._exception
         else:
             return self._result
-    def wait(self):
-        while not self._done:
-            self._executor.step()
     def send_result(self, result):
         if not self._done:
             self._result = result
@@ -85,18 +95,17 @@ class _GeneratorFuture(_BaseFuture):
     def __init__(self, executor):
         super(self.__class__, self).__init__(executor)
         self._result_list = []
-        self._got = False
+        self._incoming_result = Queue()
     def result(self):
         for rt in self._result_list:
             yield rt
-        while not self._done:
-            self._executor.step()
-            if self._got:
-                self._got = False
-                yield self._result_list[-1]
-    def wait(self):
-        while not self._done:
-            self._executor.step()
+        while not self.is_done():
+            if threading.current_thread().ident == self._executor.thread_ident:
+                while self._incoming_result.empty():
+                    self._executor.step()
+                yield self._incoming_result.get()
+            else:
+                yield self._incoming_result.get()
     def send_result(self, result):
         if not self._done:
             if type(result) is StopIteration or result is StopIteration:
@@ -105,7 +114,7 @@ class _GeneratorFuture(_BaseFuture):
                     self._executor.submit(fn, self._result_list, *args, **kwds)
             else:
                 self._result_list.append(result)
-                self._got = True
+                self._incoming_result.put(result)
         else:
             raise RuntimeError('cannot send result after done.')
     def __iter__(self):
@@ -120,13 +129,15 @@ class _TaskFuture(_BaseFuture):
     def __init__(self, executor):
         super(self.__class__, self).__init__(executor)
         self._last_result = None
-        self._got = False
+        self._incoming_result = Queue()
     def result(self):
-        while not self._done:
-            self._executor.step()
-            if self._got:
-                self._got = False
-                yield self._last_result
+        while not self.is_done():
+            if threading.current_thread().ident == self._executor.thread_ident:
+                while self._incoming_result.empty():
+                    self._executor.step()
+                yield self._incoming_result.get()
+            else:
+                yield self._incoming_result.get()
     def wait(self):
         self.result()
     def send_result(self, result):
@@ -137,7 +148,7 @@ class _TaskFuture(_BaseFuture):
                     self._executor.submit(fn, self._last_result, *args, **kwds)
             else:
                 self._last_result = result
-                self._got = True
+                self._incoming_result.put(result)
         else:
             raise RuntimeError('cannot send result after done.')
     def __iter__(self):
@@ -153,8 +164,19 @@ class _Executor(object):
     def __init__(self):
         self._tasks = collections.deque()
         self._incoming_evt = threading.Event()
+        self._thread_ident = None
+        self._step_hooks = []
     def _generator_wrapper(self, fn, args, kwds):
         yield fn(*args, **kwds)
+    @property
+    def thread_ident(self):
+        if not self._thread_ident:
+            self._thread_ident = threading.current_thread().ident
+        return self._thread_ident
+    def add_step_hook(self, fn):
+        self._step_hooks.append(fn)
+    def remove_step_hook(self, fn):
+        self._step_hooks.remove(fn)
     def _append_task(self, gen, future, exclusive):
         self._tasks.append((gen, future, exclusive))
         self._incoming_evt.set()
@@ -163,7 +185,7 @@ class _Executor(object):
         if isinstance(fn, Task):
             return self._append_task(fn(*args, **kwds), _TaskFuture(self), False)
         elif isgeneratorfunction(fn):
-            return self._append_task((fn(*args, **kwds), _GeneratorFuture(self), exclusive))
+            return self._append_task(fn(*args, **kwds), _GeneratorFuture(self), exclusive)
         else:
             return self._append_task(self._generator_wrapper(fn, args, kwds), _GeneralFuture(self), exclusive)
     def submit(self, fn, *args, **kwds):
@@ -171,6 +193,9 @@ class _Executor(object):
     def exclusive_submit(self, fn, *args, **kwds):
         return self._submit(fn, True, args, kwds)
     def step(self):
+        if self.thread_ident != threading.current_thread().ident:
+            logger.warning('Calling executor.step from other thread.')
+            return False
         try:
             gen, f, exclusive = self._tasks.popleft()
         except IndexError:
@@ -186,6 +211,8 @@ class _Executor(object):
             f.send_result(StopIteration)
         except BaseException as err:
             f.set_exception(err)
+        for fn in self._step_hooks:
+            fn()
         return True
     def join(self):
         while self.step():
@@ -194,6 +221,10 @@ class _Executor(object):
         return not bool(self._tasks)
     def wait_until_active(self):
         self._incoming_evt.wait()
+    def loop(self):
+        while True:
+            self.wait_until_active()
+            self.step()
 
 def async(func):
     def _async_callable(instance, *args, **kwds):
@@ -384,7 +415,6 @@ class Consumer(object):
                )):
                 self._consumed_resources.add(resource_reference)
                 self._bind_fn(self._instance, resource_reference.get_service())
-                # self._instance.__reference__.providing()
                 return True
             else:
                 return False
@@ -503,11 +533,6 @@ class ServiceReference(object):
     @property
     def __executor__(self):
         return self.__context__.__framework__.__executor__
-
-    def providing(self):
-        if self._provides and self.is_satisfied:
-            for c in self.__framework__.consumers():
-                c.bind(self)
 
     def start(self):
         if not self._instance:
@@ -855,6 +880,7 @@ class Framework(object):
         else:
             return self._bundles[u.bundle]
 
+    @async
     def restore_state(self):
         uri_dict = {bdl.uri: bdl for bdl in self.bundles.values()}
         invalid_uris = set()
@@ -877,6 +903,9 @@ class Framework(object):
         for bdl in self.bundles.values():
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
         self.configuration.close()
+
+    def call(self, fn, *args, **kwds):
+        self.__executor__.submit(fn, *args, **kwds)
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

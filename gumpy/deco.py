@@ -32,7 +32,7 @@ class _ConsumerHelper(object):
         self._fn = fn
         self._resource_uri = resource_uri
         self._cardinality = cardinality
-        self._unbind_fn = lambda instance: None
+        self._unbind_fn = lambda instance, service: None
         self._consumers = {}
     def __get__(self, instance, owner):
         if instance:

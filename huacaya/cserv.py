@@ -2,20 +2,20 @@
 __author__ = 'chinfeng'
 
 import functools
-import traceback
+import threading
 import wsgiref.simple_server, wsgiref.util, wsgiref.validate
-from gumpy.deco import service, configuration, bind, event, task
+from gumpy.deco import service, configuration, bind, event
+from util import HTTP_STATUS
 
 import logging
 logger = logging.getLogger(__name__)
 
 class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
     def __init__(self, executor, *args, **kwds):
-        wsgiref.simple_server.WSGIServer.__init__(self, *args, **kwds)
+        super(self.__class__, self).__init__(*args, **kwds)
         self._executor = executor
 
-    @task
-    def process_request_task(self, request, client_address):
+    def process_request_thread(self, request, client_address):
         try:
             self.finish_request(request, client_address)
             self.shutdown_request(request)
@@ -24,21 +24,21 @@ class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
             self.shutdown_request(request)
 
     def process_request(self, request, client_address):
-        self.process_request_task.spawn(request, client_address, __executor__=self._executor)
+        self._executor.submit(self.process_request_thread, request, client_address)
 
     def serve_forever(self, *args):
-        from threading import Thread
-        t = Thread(target=wsgiref.simple_server.WSGIServer.serve_forever, args=(self, ))
+        t = threading.Thread(
+            target=wsgiref.simple_server.WSGIServer.serve_forever, args=(self, )
+        )
         t.setDaemon(True)
         t.start()
 
 @service
 class WSGIService(object):
-    @configuration(rootapp='rootapp')
-    def __init__(self, rootapp):
+    def __init__(self):
         self._apps = {}
         self._server = None
-        self._rootapp = rootapp
+        self._default_app = None
         self.start_wsgi_server()
 
     @configuration(port=('port', 8002))
@@ -50,7 +50,6 @@ class WSGIService(object):
             )
             self._server.serve_forever()
         except BaseException as err:
-            traceback.print_exc()
             err.args = ('tserv start fails.', ) + err.args
             logger.exception(err)
 
@@ -74,15 +73,24 @@ class WSGIService(object):
         else:
             del self._apps[app.__class__.__name__]
 
+    @bind('cserv.default.application', '0..1')
+    def default_application(self, app):
+        wsgiref.validate.validator(app)
+        self._default_app = app
+
+    @default_application.unbind
+    def application_default(self, app):
+        self._default_app = None
+
     def _wsgi_app(self, environ, start_response):
         if self._apps:
             app_route = wsgiref.util.shift_path_info(environ)
             if app_route in self._apps:
                 environ['SCRIPT_NAME'] = ''
                 return self._apps[app_route](environ, start_response)
-            elif self._rootapp:
-                return self._apps[self._rootapp](environ, start_response)
-        start_response('404 NOT FOUND', [('Content-type', 'text/plain'), ])
+            elif self._default_app:
+                return self._default_app(environ, start_response)
+        start_response(HTTP_STATUS(404), [('Content-Type', 'text/plain'), ])
         return ['no application deployed'.encode('utf-8')]
 
     @event
@@ -90,5 +98,3 @@ class WSGIService(object):
         if key == 'port':
             ctx = self.__context__
             ctx.stop().add_done_callback(lambda rt, bdl=ctx: bdl.start())
-        elif key == 'rootapp':
-            self._rootapp = value
