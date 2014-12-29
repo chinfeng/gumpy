@@ -51,7 +51,7 @@ class _BaseFuture(object):
         return self._exception
     def wait(self):
         if not self.is_done():
-            if threading.current_thread().ident == self._executor.thread_ident:
+            if self._executor.in_loop():
                 while not self.is_done():
                     self._executor.step()
             else:
@@ -100,7 +100,7 @@ class _GeneratorFuture(_BaseFuture):
         for rt in self._result_list:
             yield rt
         while not self.is_done():
-            if threading.current_thread().ident == self._executor.thread_ident:
+            if self._executor.in_loop():
                 while self._incoming_result.empty():
                     self._executor.step()
                 yield self._incoming_result.get()
@@ -132,7 +132,7 @@ class _TaskFuture(_BaseFuture):
         self._incoming_result = Queue()
     def result(self):
         while not self.is_done():
-            if threading.current_thread().ident == self._executor.thread_ident:
+            if self._executor.in_loop():
                 while self._incoming_result.empty():
                     self._executor.step()
                 yield self._incoming_result.get()
@@ -173,6 +173,8 @@ class _Executor(object):
         if not self._thread_ident:
             self._thread_ident = threading.current_thread().ident
         return self._thread_ident
+    def in_loop(self):
+        return threading.current_thread().ident == self.thread_ident
     def add_step_hook(self, fn):
         self._step_hooks.append(fn)
     def remove_step_hook(self, fn):
@@ -193,7 +195,7 @@ class _Executor(object):
     def exclusive_submit(self, fn, *args, **kwds):
         return self._submit(fn, True, args, kwds)
     def step(self):
-        if self.thread_ident != threading.current_thread().ident:
+        if not self.in_loop():
             logger.warning('Calling executor.step from other thread.')
             return False
         try:
