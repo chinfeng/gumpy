@@ -5,12 +5,22 @@ import random
 import unittest
 
 class OAuthTestCase(unittest.TestCase):
-    def setUp(self):
+    def test_mock_storage(self):
         from huacaya.storage import mock
-        self._storage = mock.Storage()
+        self._exec(mock.MockStorage())
 
-    def test_storage(self):
-        storage = self._storage
+    def test_mongo_storage(self):
+        storage = None
+        try:
+            from huacaya.storage import mongo
+            from pymongo.mongo_client import MongoClient
+            storage = mongo.MongoStorage(MongoClient().huacaya)
+        except:
+            self.skipTest('MongoDB at localhost is not avaliable now, test_mongo_storage skipped.')
+        if storage:
+            self._exec(storage)
+
+    def _exec(self, storage):
         bkt = storage.get_bucket('testbkt')
         self.assertIsNotNone(bkt)
 

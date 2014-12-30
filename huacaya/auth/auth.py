@@ -13,14 +13,17 @@ class Provider(object):
     def __init__(self, server):
         self._server = server
 
-    def authorization_request(self, client_id, redirect_uri=None):
-        return self._server.authorization_request(client_id, redirect_uri)
+    def authorization_request(self, client_id, account_id, redirect_uri=None):
+        return self._server.authorization_request(client_id, account_id, redirect_uri)
 
-    def authorization_grant(self, authorization_code, credentials, redirect_uri=None):
-        return self._server.authorization_grant(authorization_code, credentials, redirect_uri)
+    def authorization_grant(self, authorization_code, redirect_uri=None):
+        return self._server.authorization_grant(authorization_code, redirect_uri)
 
     def refresh_grant(self, token):
         return self._server.refresh_grant(token)
+
+    def implicit_grant(self, client_id, account_id, redirect_uri=None):
+        return self._server.implicit_grant(client_id, account_id, redirect_uri)
 
 class Server(object):
     def __init__(self, dao=None):
@@ -66,41 +69,42 @@ class Server(object):
     def revoke_authorization_code(self, authorization_code):
         self._dao.update_authorization_code(authorization_code, dict(disabled=True))
 
-    def authorization_request(self, client_id, redirect_uri=None):
+    def authorization_request(self, client_id, account_id, redirect_uri=None):
         if self._dao.has_client_id(client_id):
             authorization_code_data = {
                 'code': uuid.uuid4().hex,
                 'issue_time': datetime.datetime.now(),
                 'expires_in': 300,
                 'disabled': False,
+                'account_id': account_id,
                 'redirect_uri': redirect_uri,
+                'client_id': client_id,
             }
             self._dao.insert_authorization_code(authorization_code_data)
             return authorization_code_data['code']
         else:
             return None
 
-    def authorization_grant(self, authorization_code, credentials, redirect_uri=None):
+    def authorization_grant(self, authorization_code, redirect_uri=None):
         if self.verify_authorization_code(authorization_code, redirect_uri):
-            account = self._dao.find_account(credentials)
-            if account:
-                refresh_token = uuid.uuid4().hex
-                refresh_token_data = {
-                    'issue_time': datetime.datetime.now(),
-                    'refresh_token': refresh_token,
-                    'account_id': account['account_id'],
-                    'disabled': False,
-                }
-                self._dao.insert_token(refresh_token_data)
-                access_token_data = self.refresh_grant(refresh_token)
-                return {
-                    'token_type': 'bearer',
-                    'access_token': access_token_data['access_token'],
-                    'expires_in': access_token_data['expires_in'],
-                    'refresh_token': refresh_token,
-                }
-            else:
-                raise AuthorizationError('invalid user credentials')
+            authorization_code_data = self._dao.get_authorization_code(authorization_code)
+            refresh_token = uuid.uuid4().hex
+            refresh_token_data = {
+                'grant_type': 'authorization_code',
+                'issue_time': datetime.datetime.now(),
+                'refresh_token': refresh_token,
+                'account_id': authorization_code_data['account_id'],
+                'associated_authorization_code': authorization_code,
+                'disabled': False,
+            }
+            self._dao.insert_token(refresh_token_data)
+            access_token_data = self.refresh_grant(refresh_token)
+            return {
+                'token_type': 'bearer',
+                'access_token': access_token_data['access_token'],
+                'expires_in': access_token_data['expires_in'],
+                'refresh_token': refresh_token,
+            }
         else:
             raise AuthorizationError('invalid authorization code')
 
@@ -109,10 +113,12 @@ class Server(object):
         if refresh_token_data and not refresh_token_data.get('disabled', False):
             access_token = uuid.uuid4().hex
             access_token_data = {
+                'grant_type': 'refresh_token',
                 'issue_time': datetime.datetime.now(),
                 'access_token': access_token,
                 'account_id': refresh_token_data['account_id'],
                 'expires_in': 86400,
+                'associated_refresh_token': refresh_token,
                 'disabled': False,
             }
             self._dao.insert_token(access_token_data)
@@ -124,6 +130,49 @@ class Server(object):
             }
         else:
             raise InvalidTokenError('invalid refresh token {0}'.format(refresh_token))
+
+    def implicit_grant(self, client_id, account_id, redirect_uri=None):
+        if self._dao.has_client_id(client_id):
+            access_token = uuid.uuid4().hex
+            access_token_data = {
+                'grant_type': 'implicit',
+                'issue_time': datetime.datetime.now(),
+                'access_token': access_token,
+                'account_id': account_id,
+                'expires_in': 86400,
+                'disabled': False,
+                'redirect_uri': redirect_uri,
+            }
+            self._dao.insert_token(access_token_data)
+            return {
+                'token_type': 'bearer',
+                'access_token': access_token,
+                'expires_in': access_token_data['expires_in'],
+            }
+        else:
+            raise AuthorizationError('unauthorized client_id: {0}'.format(client_id))
+
+    def password_grant(self, credentials):
+        account = self._dao.find_account(credentials)
+        if account:
+            refresh_token = uuid.uuid4().hex
+            refresh_token_data = {
+                'grant_type': 'password',
+                'issue_time': datetime.datetime.now(),
+                'refresh_token': refresh_token,
+                'account_id': account['account_id'],
+                'disabled': False,
+            }
+            self._dao.insert_token(refresh_token_data)
+            access_token_data = self.refresh_grant(refresh_token)
+            return {
+                'token_type': 'bearer',
+                'access_token': access_token_data['access_token'],
+                'expires_in': access_token_data['expires_in'],
+                'refresh_token': refresh_token,
+            }
+        else:
+            raise AuthorizationError('invalid authorization code')
 
     def get_accounts(self):
         return self._dao.get_accounts()
@@ -144,6 +193,10 @@ class Server(object):
         auth_loc = urlparse(auth_redirect_uri or '')
         acc_loc = urlparse(acc_redirect_url or '')
         return auth_loc.netloc == acc_loc.netloc
+
+    def find_account(self, credentials):
+        return self._dao.find_account(credentials)
+
 
 class ServerDaoWithStorage(object):
     def __init__(self, storage):
@@ -199,6 +252,9 @@ class ServerDaoWithStorage(object):
             if set(data.items()).issubset(self._accounts[account_id].items()):
                 return self._accounts[account_id]
         return None
+
+    def get_account_by_id(self, account_id):
+        return self._accounts.get_object_content(account_id)
 
     def update_token(self, token, param):
         token_data = self._tokens.get_object_content(token)

@@ -14,7 +14,7 @@ from tempfile import gettempdir
 
 _singleton_storage = None
 
-class Bucket(BucketBase):
+class MockBucket(BucketBase):
     def __init__(self, name, db, storage):
         self._name = name
         self._db = db
@@ -65,7 +65,7 @@ class Bucket(BucketBase):
     def keys(self):
         return [key.decode('utf-8') for key in self._db.keys()]
 
-class Storage(StorageBase):
+class MockStorage(StorageBase):
     def __init__(self, path=None):
         if path:
             self._path = os.path.abspath(path)
@@ -77,14 +77,14 @@ class Storage(StorageBase):
 
     def get_bucket(self, name):
         if name in self._dbs:
-            return Bucket(name, self._dbs[name], self)
+            return MockBucket(name, self._dbs[name], self)
         else:
             pt = os.path.join(self._path, name)
             if not os.path.isdir(pt):
                 os.mkdir(pt)
             db = dbm.open(os.path.join(pt, 'storage'), 'c')
             self._dbs[name] = db
-            return Bucket(name, db, self)
+            return MockBucket(name, db, self)
 
     def __getitem__(self, item):
         return self.get_bucket(item)
@@ -92,7 +92,7 @@ class Storage(StorageBase):
     def delete(self, bucket):
         if type(bucket) is str:
             name = bucket
-        elif isinstance(bucket, Bucket):
+        elif isinstance(bucket, MockBucket):
             name = bucket._name
         else:
             return
