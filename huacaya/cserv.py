@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
     def __init__(self, executor, *args, **kwds):
-        super(self.__class__, self).__init__(*args, **kwds)
+        wsgiref.simple_server.WSGIServer.__init__(self, *args, **kwds)
         self._executor = executor
 
     def process_request_thread(self, request, client_address):
