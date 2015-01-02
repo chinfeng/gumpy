@@ -3,104 +3,95 @@ __author__ = 'chinfeng'
 
 from .base import BucketBase, StorageBase
 import pickle
-import shutil
-import os
-import sys
-try:
-    import anydbm as dbm
-except ImportError:
-    import dbm
-from tempfile import gettempdir
+import base64
+import sqlite3
 
 _singleton_storage = None
 
 class MockBucket(BucketBase):
-    def __init__(self, name, db, storage):
-        self._name = name
-        self._db = db
+    def __init__(self, storage, db, name):
         self._storage = storage
+        self._db = db
+        self._name = name
+        self._db.cursor().execute('''
+            CREATE TABLE IF NOT EXISTS {0} (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              k VARCHAR UNIQUE,
+              v BLOG
+            )
+        '''.format(name))
 
     def delete(self):
-        self._storage.delete(self._name)
+        self._db.cursor().execute(
+            'DROP TABLE IF EXISTS {0}'.format(self._name)
+        )
 
-    def put_object(self, key, content, metadata=None):
-        key = key.encode('utf-8') if isinstance(key, str) else key
-        self._db[key] = pickle.dumps((metadata, content))
+    def put_object(self, key, content):
+        sql = 'INSERT OR REPLACE INTO {0}(k, v) VALUES(?, ?)'.format(self._name)
+        self._db.cursor().execute(sql, (key, pickle.dumps(content)))
 
     def get_object(self, key):
-        key = key.encode('utf-8') if isinstance(key, str) else key
-        return pickle.loads(self._db[key])
+        sql = 'SELECT v FROM {0} WHERE k=?'.format(self._name)
+        one = self._db.cursor().execute(sql, (key, )).fetchone()
+        return pickle.loads(one[0]) if one else None
 
     def delete_object(self, key):
-        key = key.encode('utf-8') if isinstance(key, str) else key
-        del self._db[key]
-
-    def get_object_content(self, key):
-        key = key.encode('utf-8') if isinstance(key, str) else key
-        return self.get_object(key)[1]
+        sql = 'DELETE FROM {0} WHERE k=?'.format(self._name)
+        self._db.cursor().execute(sql, (key, ))
 
     def find(self, fields):
-        for k in self._db.keys():
-            obj = self.get_object_content(k)
-            if set(fields.items()).issubset(set(obj.items())):
-                yield obj
+        for k, v in self.items():
+            if set(fields.items()).issubset(set(v.items())):
+                yield k, v
 
     def find_one(self, fields):
-        for k in self._db.keys():
-            obj = self.get_object_content(k)
-            if set(fields.items()).issubset(set(obj.items())):
-                return obj
+        for k, v in self.items():
+            if set(fields.items()).issubset(set(v.items())):
+                return k, v
         return None
 
     def __getitem__(self, item):
-        return self.get_object_content(item)
+        return self.get_object(item)
 
     def __contains__(self, item):
-        item = item.encode('utf-8') if isinstance(item, str) else item
-        return item in self._db
+        sql = 'SELECT COUNT(id) FROM {0} WHERE k=?'.format(self._name)
+        return self._db.cursor().execute(sql, (item, )).fetchone()[0] > 0
 
     def __iter__(self):
-        return iter((key.decode('utf-8') for key in self._db.keys()))
+        sql = 'SELECT k FROM {0}'.format(self._name)
+        for row in self._db.cursor().execute(sql):
+            yield row[0]
 
     def keys(self):
-        return [key.decode('utf-8') for key in self._db.keys()]
+        return list(self)
+
+    def items(self):
+        sql = 'SELECT k, v FROM {0}'.format(self._name)
+        for row in self._db.cursor().execute(sql):
+            yield row[0], pickle.loads(row[1])
+
 
 class MockStorage(StorageBase):
-    def __init__(self, path=None):
-        if path:
-            self._path = os.path.abspath(path)
-        else:
-            self._path = os.path.join(os.path.abspath(gettempdir()), '.mock_storage_{0}'.format(sys.version_info.major))
-        self._dbs = {}
-        if not os.path.isdir(self._path):
-            os.mkdir(self._path)
+    def __init__(self, uri=':memory:'):
+        self._sqlite_db = sqlite3.connect(uri, check_same_thread=False)
+
+    def _to_table_name(self, name):
+        return base64.b32encode(name.encode('utf-8')).decode('utf-8').strip('=')
 
     def get_bucket(self, name):
-        if name in self._dbs:
-            return MockBucket(name, self._dbs[name], self)
-        else:
-            pt = os.path.join(self._path, name)
-            if not os.path.isdir(pt):
-                os.mkdir(pt)
-            db = dbm.open(os.path.join(pt, 'storage'), 'c')
-            self._dbs[name] = db
-            return MockBucket(name, db, self)
+        return MockBucket(self, self._sqlite_db, self._to_table_name(name))
 
     def __getitem__(self, item):
         return self.get_bucket(item)
 
     def delete(self, bucket):
-        if type(bucket) is str:
-            name = bucket
+        if isinstance(bucket, str):
+            self.get_bucket(bucket).delete()
         elif isinstance(bucket, MockBucket):
-            name = bucket._name
-        else:
-            return
-        if name in self._dbs:
-            self._dbs.pop(name).close()
-        pt = os.path.join(self._path, name)
-        if os.path.isdir(pt):
-            shutil.rmtree(pt)
+            bucket.delete()
 
-    def __contains__(self, item):
-        return os.path.isdir(os.path.join(self._path, item))
+    def __contains__(self, name):
+        return self._sqlite_db.cursor().execute(
+            'SELECT count(*) FROM sqlite_master WHERE type=? and name=?',
+            ('table', self._to_table_name(name))
+        ).fetchone()[0] > 0

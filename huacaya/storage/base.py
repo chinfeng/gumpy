@@ -5,16 +5,13 @@ class BucketBase(object):
     def delete(self):
         raise NotImplementedError
 
-    def put_object(self, key, content, metadata=None):
+    def put_object(self, key, content):
         raise NotImplementedError
 
     def get_object(self, key):
         raise NotImplementedError
 
     def delete_object(self, key):
-        raise NotImplementedError
-
-    def get_object_content(self, key):
         raise NotImplementedError
 
     def __contains__(self, item):

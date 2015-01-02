@@ -34,13 +34,12 @@ class OAuthTestCase(unittest.TestCase):
 
         bkt.put_object('1.txt', cnt_1)
         self.assertIn('1.txt', bkt)
-        self.assertEqual(cnt_1, bkt.get_object_content('1.txt'))
+        self.assertEqual(cnt_1, bkt.get_object('1.txt'))
 
-        bkt.put_object('2.txt', cnt_2, metadata={'content_type': 'text/plain'})
+        bkt.put_object('2.txt', cnt_2)
         self.assertIn('2.txt', bkt)
-        metadata, cnt = bkt.get_object('2.txt')
+        cnt = bkt.get_object('2.txt')
         self.assertEqual(cnt, cnt_2)
-        self.assertEqual(metadata['content_type'], 'text/plain')
 
         bkt.delete_object('1.txt')
         self.assertNotIn('1.txt', bkt)

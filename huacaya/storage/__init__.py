@@ -17,7 +17,5 @@ def StorageService():
         return MongoStorage(client.huacaya)
     except:
         from .mock import MockStorage
-        from tempfile import gettempdir
-        path = os.path.join(os.path.abspath(gettempdir()), '.mock_storage_{0}'.format(sys.version_info.major))
-        return MockStorage(path)
+        return MockStorage()
 
