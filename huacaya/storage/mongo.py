@@ -15,27 +15,23 @@ class MongoBucket(BucketBase):
     def delete(self):
         self._collection.drop()
 
-    def put_object(self, key, content, metadata=None):
+    def put_object(self, key, content):
         doc = self._collection.find_one({'key': key})
         if doc:
             doc['content'] = content
-            doc['metadata'] = metadata
             self._collection.save(doc)
         else:
             self._collection.insert(
-                {'key': key, 'content': content, 'metadata': metadata}
+                {'key': key, 'content': content}
             )
 
     def get_object(self, key):
         obj = self._collection.find_one({'key': key}, {'_id': False, 'key': False})
         if obj:
-            return obj['metadata'], obj['content']
+            return obj['content']
 
     def delete_object(self, key):
         self._collection.remove({'key': key})
-
-    def get_object_content(self, key):
-        return self.get_object(key)[1]
 
     def find(self, fields):
         find_fields = {'content.%s' % k: v for k, v in fields.items()}
@@ -47,13 +43,13 @@ class MongoBucket(BucketBase):
         return self._collection.find_one(find_fields)
 
     def __getitem__(self, item):
-        return self.get_object_content(item)
+        return self.get_object(item)
 
     def __contains__(self, item):
         return self._collection.find({'key': item}).count() > 0
 
     def __iter__(self):
-        for doc in  self._collection.find(fields={'key': True, '_id': False}):
+        for doc in self._collection.find(fields={'key': True, '_id': False}):
             yield doc['key']
 
     def keys(self):
