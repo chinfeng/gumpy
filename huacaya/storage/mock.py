@@ -2,11 +2,39 @@
 __author__ = 'chinfeng'
 
 from .base import BucketBase, StorageBase
-import pickle
+from time import mktime
+import json
+import datetime
 import base64
 import sqlite3
 
 _singleton_storage = None
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime.datetime):
+            return {'__utctimestamp__': mktime(obj.timetuple())}
+        if isinstance(obj, bytes):
+            return {'__bytes__': base64.b64encode(obj).decode('ascii')}
+        else:
+            return super(self.__class__, self).default(obj)
+
+class EnhancedJSONDecoder(json.JSONDecoder):
+    def __init__(self, *args, **kwargs):
+        json.JSONDecoder.__init__(self, *args, object_hook=self.object_hook, **kwargs)
+    def object_hook(self, dct):
+        if '__utctimestamp__' in dct:
+            return datetime.datetime.fromtimestamp(dct['__utctimestamp__'])
+        elif '__bytes__' in dct:
+            return base64.b64decode(dct['__bytes__'].encode('ascii'))
+        else:
+            return dct
+
+def _dumps(dct):
+    return json.dumps(dct, cls=EnhancedJSONEncoder)
+
+def _loads(raw):
+    return json.loads(raw, cls=EnhancedJSONDecoder)
 
 class MockBucket(BucketBase):
     def __init__(self, storage, db, name):
@@ -28,12 +56,12 @@ class MockBucket(BucketBase):
 
     def put_object(self, key, content):
         sql = 'INSERT OR REPLACE INTO {0}(k, v) VALUES(?, ?)'.format(self._name)
-        self._db.cursor().execute(sql, (key, pickle.dumps(content)))
+        self._db.cursor().execute(sql, (key, _dumps(content)))
 
     def get_object(self, key):
         sql = 'SELECT v FROM {0} WHERE k=?'.format(self._name)
         one = self._db.cursor().execute(sql, (key, )).fetchone()
-        return pickle.loads(one[0]) if one else None
+        return _loads(one[0]) if one else None
 
     def delete_object(self, key):
         sql = 'DELETE FROM {0} WHERE k=?'.format(self._name)
@@ -68,7 +96,7 @@ class MockBucket(BucketBase):
     def items(self):
         sql = 'SELECT k, v FROM {0}'.format(self._name)
         for row in self._db.cursor().execute(sql):
-            yield row[0], pickle.loads(row[1])
+            yield row[0], _loads(row[1])
 
 
 class MockStorage(StorageBase):

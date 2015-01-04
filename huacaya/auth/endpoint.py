@@ -17,7 +17,7 @@ except ImportError:
 import logging
 logger = logging.getLogger(__name__)
 
-from .auth import AuthorizationError, InvalidTokenError
+from .auth import AuthorizationError
 
 def json_default(obj):
     if isinstance(obj, datetime.datetime):
@@ -29,6 +29,8 @@ class BaseHandler(tornado.web.RequestHandler):
     def initialize(self, **kwds):
         self._auth_server = kwds.get('auth_server', None)
         self._auth_provider = kwds.get('auth_provider', None)
+        self._current_user = None
+
     def prepare(self):
         if all((
             self.request.method.upper() != 'GET',
@@ -37,20 +39,55 @@ class BaseHandler(tornado.web.RequestHandler):
             self.json_data = json_decode(self.request.body)
         else:
             self.json_data = None
+
     def get_argument(self, name, default=None, strip=True):
         if self.json_data:
             arg = self.json_data.get(name, default)
             return arg.strip() if strip and isinstance(arg, str) else arg
         else:
             return tornado.web.RequestHandler.get_argument(self, name, default, strip)
+
     def write_error(self, status_code, **kwds):
         try:
             self.write(kwds)
         except TypeError:
             tornado.web.RequestHandler.write_error(self, status_code, **kwds)
+
     def get_current_user(self):
-        account_raw = self.get_secure_cookie('account', None)
-        return json_decode(account_raw) if account_raw else None
+        if not self._current_user:
+            account_raw = self.get_secure_cookie('account', None)
+            self._current_user = json_decode(account_raw) if account_raw else None
+        return self._current_user
+
+class RedirectBaseHandler(BaseHandler):
+    def send_redirect(self, redirect_uri, args):
+        self.clear()
+        url_parts = list(urlsplit(redirect_uri))
+        url_parts[3] = '&'.join((urlencode({k: v for k, v in args.items() if v is not None}), url_parts[3])).strip('&')
+        self.redirect(urlunsplit(url_parts))
+
+    def send_invalid_request_error(self, redirect_uri, state=None):
+        self.send_redirect(redirect_uri, dict(
+            state=state, error='invalid_request', error_description='The request is missing a required parameter.',
+        ))
+
+    def send_unsupported_response_type_error(self, redirect_uri, state=None):
+        self.send_redirect(redirect_uri, dict(
+            state=state, error='unsupported_response_type',
+            error_description='The authorization server does not support obtaining an authorization code using this method.',
+        ))
+
+    def send_unauthorized_client_error(self, redirect_uri, state=None):
+        self.send_redirect(redirect_uri, dict(
+            state=state, error='unauthorized_client',
+            error_description='The client is not authorized to request an authorization code using this method.',
+        ))
+
+    def send_access_denied_error(self, redirect_uri, state=None):
+        self.send_redirect(redirect_uri, dict(
+            state=state, error='access_denied',
+            error_description='The resource owner or authorization server denied the request.',
+        ))
 
 class MainHandler(BaseHandler):
     __route__ = r'/?'
@@ -117,16 +154,24 @@ class AccountInfoHandler(BaseHandler):
 
     def get(self):
         token = self._get_access_token()
-        if self._auth_server.verify_token(token):
+        if self._auth_server.verify_scope(token, 'me'):
             account = self._auth_server.get_account_by_token(token)
 
             if account:
-                if 'password' in account:
-                    account.pop('password')
+                account.pop('password', None)
                 self.write(account)
             else:
-                self.send_error(500)
+                self.send_error(
+                    500, error='server_error',
+                    error_description='account not found',
+                )
         else:
+            self.set_header(
+                'WWW-Authenticate',
+                'Bearer realm="{0}", error="{1}"'.format(
+                    'example', 'access_denied',
+                )
+            )
             self.send_error(401)
 
 class SignInHandler(BaseHandler):
@@ -139,137 +184,122 @@ class SignInHandler(BaseHandler):
         self.set_secure_cookie('account', json.dumps(account, default=json_default))
         self.write({'sign_in': 'success'})
 
-class AuthorizeHandler(BaseHandler):
+class AuthorizeHandler(RedirectBaseHandler):
     __route__ = r'/authorize'
     __sign_in_endpoint__ = r'/signin.html'
     __auth_endpoint__ = r'/auth.html'
     __default_redirect__ = r'/default_callback'
 
     def get(self):
-        response_type = self.get_argument('response_type', None)
+        # https://tools.ietf.org/html/rfc6749#section-4.1.1
+        # https://tools.ietf.org/html/rfc6749#section-4.2.1
+        # 暂无默认 redirect callback 机制，所以 redirect_uri 必要参数
+
         redirect_uri = self.get_argument('redirect_uri', None)
-
-        if response_type == 'code' or response_type == 'token':
-            # https://tools.ietf.org/html/rfc6749#section-4.1.1
-            # https://tools.ietf.org/html/rfc6749#section-4.2.1
-            # 暂无默认 redirect callback 机制，所以 redirect_uri 必要参数
-            client_id = self.get_argument('client_id', None)
-            if client_id and redirect_uri:
-                if self._auth_server.has_client_id(client_id):
-                    dest_uri = self.__sign_in_endpoint__
-                    dct = {
-                        'response_type': response_type,
-                        'client_id': client_id,
-                        'redirect_uri': redirect_uri,
-                    }
-                else:
-                    dct = {'error': 'unauthorized_client'}
-            else:
-                dct = {'error': 'invalid_request'}
-        elif response_type:
-            dct = {'error': 'unsupported_response_type'}
-        else:
-            dct = {'error': 'invalid_request'}
-
+        response_type = self.get_argument('response_type', None)
+        client_id = self.get_argument('client_id', None)
+        scope = self.get_argument('scope', None)
         state = self.get_argument('state', None)
-        if state:
-            dct['state'] = state
 
-        dest_uri = (redirect_uri or self.__default_redirect__) if 'error' in dct else dest_uri
-        url_parts = list(urlsplit(dest_uri))
-        url_parts[3] = '&'.join((url_parts[3], urlencode(dct)))
-        self.redirect(urlunsplit(url_parts))
+        if not (redirect_uri and response_type and client_id):
+            self.send_invalid_request_error(redirect_uri or self.__default_redirect__, state)
+        elif response_type not in ('code', 'token'):
+            self.send_unsupported_response_type_error(redirect_uri, state)
+        elif not self._auth_server.has_client_id(client_id):
+            self.send_unauthorized_client_error(redirect_uri, state)
+        else:
+            self.send_redirect(self.__sign_in_endpoint__, dict(
+                response_type=response_type, client_id=client_id,
+                redirect_uri=redirect_uri, state=state, scope=scope,
+            ))
 
     def post(self):
-        response_type = self.get_argument('response_type', '').lower()
-        redirect_uri = self.get_argument('redirect_uri', None)
-        agreed = self.get_argument('agreed', 0)
+        # https://tools.ietf.org/html/rfc6749#section-4.1.1
+        # https://tools.ietf.org/html/rfc6749#section-4.2.1
+        # 暂无默认 redirect callback 机制，所以 redirect_uri 必要参数
 
-        if not agreed:
-            dct = {'error': 'access_denied'}
+        redirect_uri = self.get_argument('redirect_uri', None)
+        response_type = self.get_argument('response_type', None)
+        client_id = self.get_argument('client_id', None)
+        state = self.get_argument('state', None)
+        scope = self.get_argument('scope', None)
+        agreed = self.get_argument('agreed', 0)
+        account = self.get_current_user()
+
+        if not (redirect_uri and response_type and client_id):
+            self.send_invalid_request_error(redirect_uri or self.__default_redirect__, state)
+        elif not agreed:
+            self.send_access_denied_error(redirect_uri, state)
+        if not (redirect_uri and response_type and client_id):
+            self.send_invalid_request_error(redirect_uri, state)
         elif response_type == 'code':
             # https://tools.ietf.org/html/rfc6749#section-4.1.1
             # 暂无默认 redirect callback 机制，所以 redirect_uri 必要参数
-            client_id = self.get_argument('client_id', None)
-            if client_id and redirect_uri:
-                if self._auth_server.has_client_id(client_id):
-                    account_id = self.get_current_user()['account_id']
-                    dct = {
-                        'code': self._auth_provider.authorization_request(client_id, account_id, redirect_uri)
-                    }
-                else:
-                    dct = {'error': 'unauthorized_client'}
+            if self._auth_server.has_client_id(client_id):
+                self.send_redirect(redirect_uri, dict(
+                    state=state,
+                    code=self._auth_provider.authorization_request(account['username'], client_id, redirect_uri, scope)
+                ))
             else:
-                dct = {'error': 'invalid_request'}
+                self.send_unauthorized_client_error(redirect_uri, state)
         elif response_type == 'token':
             # https://tools.ietf.org/html/rfc6749#section-4.2.1
             # 暂无默认 redirect callback 机制，所以 redirect_uri 必要参数
-            client_id = self.get_argument('client_id', None)
-            if client_id and redirect_uri:
-                if self._auth_server.has_client_id(client_id):
-                    account_id = self.get_current_user()['account_id']
-                    access_token_data = self._auth_provider.implicit_grant(client_id, account_id, redirect_uri)
-                    dct = {
-                        'access_token': access_token_data['access_token'],
-                        'expires_in': access_token_data['expires_in'],
-                        'token_type': access_token_data['token_type'],
-                    }
-                else:
-                    dct = {'error': 'unauthorized_client'}
+            if self._auth_server.has_client_id(client_id):
+                    access_token_data = self._auth_provider.implicit_grant(account['username'], client_id, redirect_uri, scope)
+                    self.send_redirect(redirect_uri, dict(
+                        state=state, expires_in=access_token_data['expires_in'],
+                        token_type=access_token_data['token_type'], access_token=access_token_data['access_token'],
+                    ))
             else:
-                dct = {'error': 'invalid_request'}
+                self.send_unauthorized_client_error(redirect_uri, state)
         else:
-            dct = {'error': 'unsupported_response_type'}
-
-        state = self.get_argument('state', None)
-        if state:
-            dct['state'] = state
-
-        url_parts = list(urlsplit(redirect_uri))
-        url_parts[3] = '&'.join((url_parts[3], urlencode(dct)))
-        self.redirect(urlunsplit(url_parts))
-
+            self.send_unsupported_response_type_error(redirect_uri, state)
 
 class GrantHandler(BaseHandler):
     __route__ = r'/grant'
 
     def post(self):
         grant_type = self.get_argument('grant_type', None)
+
         if grant_type == 'authorization_code':
-            code = self.get_argument('code', None)
-            if code:
-                try:
-                    self.write(
-                        self._auth_provider.authorization_grant(
-                            code, self.get_argument('redirect_uri', None)
-                        )
+            authorization_code = self.get_argument('code', None)
+            client_id = self.get_argument('client_id', None)
+            redirect_uri = self.get_argument('redirect_uri', None)
+
+            try:
+                self.write(
+                    self._auth_provider.authorization_code_grant(
+                        authorization_code, client_id, redirect_uri
                     )
-                except AuthorizationError:
-                    self.send_error(400, error='invalid_grant')
-            else:
-                self.send_error(400, error='invalid_grant')
+                )
+            except BaseException as err:
+                self.send_error(400, **err.args[0])
         elif grant_type == 'refresh_token':
             # Refreshing an Access Token
             # https://tools.ietf.org/html/rfc6749#section-6
             try:
-                self.set_header('Content-Type', 'application/json; charset=utf-8')
-                self.write(json.dumps(
-                    self._auth_provider.refresh_grant(self.get_argument('refresh_token', None)),
-                    default=json_default,
-                ))
-            except InvalidTokenError:
-                self.send_error(400, error='invalid_grant')
+                self.write(
+                    self._auth_provider.refresh_token_grant(self.get_argument('refresh_token', None))
+                )
+            except BaseException as err:
+                self.send_error(400, **err.args[0])
         elif grant_type == 'password':
+            username = self.get_argument('username', None)
+            password = self.get_argument('password', None)
+            scope = self.get_argument('scope', None)
+
             try:
-                account = self._auth_server.password_grant({
-                    'username': self.get_argument('username'),
-                    'password': self. get_argument('password'),
-                })
-                self.write(account)
+                token_data = self._auth_server.password_grant(
+                    username, {'username': username, 'password': password}, scope)
+                self.write(token_data)
             except AuthorizationError:
                 self.send_error(400, error='invalid_request')
         elif grant_type:
-            self.send_error(400, error='unsupported_grant_type')
+            self.send_error(
+                400, error='unsupported_grant_type',
+                error_description='The authorization grant type is not supported by the authorization server.',
+            )
 
 class EndpointApplication(tornado.web.Application):
     def __init__(self, auth_server, auth_provider):

@@ -37,46 +37,77 @@ class OAuthTestCase(WSGITestCase):
 
         # test user and client register
         serv.register_client(client_id)
-        account_id = serv.register_account({'username': username, 'password': password})
+        serv.register_account({'username': username, 'password': password})
         with self.assertRaises(RegisterError):
             serv.register_client(client_id)
         with self.assertRaises(RegisterError):
             serv.register_account({'username': username})
 
-        # test client grant
-        authorization_code = provider.authorization_request(client_id, account_id)
-        self.assertTrue(serv.verify_authorization_code(authorization_code))
-        self.assertIsNone(provider.authorization_request(uuid.uuid4().hex, account_id))
+        redirect_uri = '/redirect/callback'
+        scope = 'me,other'
 
-        # test user authorization
-        token_data = provider.authorization_grant(authorization_code)
-        access_token, refresh_token = token_data['access_token'], token_data['refresh_token']
-        self.assertTrue(serv.verify_token(access_token))
-        self.assertTrue(serv.verify_token(refresh_token))
+        # Authorization Code Request
+        authorization_code = provider.authorization_request(username, client_id, redirect_uri, scope)
+        self.assertTrue(provider.verify_authorization_code(authorization_code))
 
-        # test accessing protected resource
-        account = serv.get_account_by_token(access_token)
-        self.assertEqual(account['username'], username)
-        self.assertEqual(account['password'], password)
+        # Authorization Code Grant
+        token_data = provider.authorization_code_grant(authorization_code, client_id, redirect_uri)
+        access_token = token_data['access_token']
+        refresh_token = token_data['refresh_token']
+        self.assertTrue(provider.verify_token(access_token))
+        self.assertTrue(provider.verify_token(refresh_token))
+        self.assertIn('expires_in', token_data)
+        self.assertEqual('bearer', token_data['token_type'])    # only one type support so far
+
+        # test scope
+        self.assertTrue(provider.verify_scope(access_token, 'me'))
+        self.assertTrue(provider.verify_scope(access_token, 'other'))
 
         # revoke token
         serv.revoke_authorization_code(authorization_code)
         serv.revoke_token(access_token)
 
-        self.assertFalse(serv.verify_authorization_code(authorization_code))
-        self.assertFalse(serv.verify_token(access_token))
+        self.assertFalse(provider.verify_authorization_code(authorization_code))
+        self.assertFalse(provider.verify_token(access_token))
         with self.assertRaises(AuthorizationError):
-            provider.authorization_grant(authorization_code, None)
+            provider.authorization_code_grant(authorization_code, client_id, redirect_uri)
 
-        token_data = provider.refresh_grant(refresh_token)
-        self.assertTrue(serv.verify_token(token_data['access_token']))
+        # refresh token grant
+        token_data = provider.refresh_token_grant(refresh_token)
+        new_access_token = token_data['access_token']
+        self.assertTrue(provider.verify_token(new_access_token))
+        self.assertTrue(provider.verify_scope(new_access_token, 'me'))
+        self.assertTrue(provider.verify_scope(new_access_token, 'other'))
 
         serv.revoke_token(access_token)
         serv.revoke_token(refresh_token)
-        self.assertFalse(serv.verify_token(access_token))
-        self.assertFalse(serv.verify_token(refresh_token))
-        with self.assertRaises(InvalidTokenError):
-            provider.refresh_grant(refresh_token)
+        self.assertFalse(provider.verify_token(access_token))
+        self.assertFalse(provider.verify_token(refresh_token))
+        with self.assertRaises(AuthorizationError):
+            provider.refresh_token_grant(refresh_token)
+
+        # Implicit Grant
+        token_data = provider.implicit_grant(username, client_id, redirect_uri, scope)
+        access_token = token_data['access_token']
+        self.assertTrue(provider.verify_token(access_token))
+        self.assertTrue(provider.verify_scope(token_data['access_token'], 'me'))
+        self.assertTrue(provider.verify_scope(token_data['access_token'], 'other'))
+
+        # Resource Owner Password Credentials Grant
+        token_data = provider.password_grant(username, {'username': username, 'password': password}, scope)
+        access_token = token_data['access_token']
+        refresh_token = token_data['refresh_token']
+        self.assertTrue(provider.verify_token(access_token))
+        self.assertTrue(provider.verify_token(refresh_token))
+        self.assertTrue(provider.verify_scope(token_data['access_token'], 'me'))
+        self.assertTrue(provider.verify_scope(token_data['access_token'], 'other'))
+
+        # refresh token grant from credentials grant
+        token_data = provider.refresh_token_grant(refresh_token)
+        new_access_token = token_data['access_token']
+        self.assertTrue(provider.verify_token(new_access_token))
+        self.assertTrue(provider.verify_scope(new_access_token, 'me'))
+        self.assertTrue(provider.verify_scope(new_access_token, 'other'))
 
     def test_authorization_code_grant(self):
         """ 授权码三段验证
@@ -143,6 +174,7 @@ class OAuthTestCase(WSGITestCase):
             'response_type': 'code',
             'client_id': client_id,
             'redirect_uri': 'http://www.other.com/code',
+            'scope': 'me, other',
             'state': 'xyz',
         }
         resp = self.request(
@@ -245,6 +277,7 @@ class OAuthTestCase(WSGITestCase):
         access_request_mock_data = {
             'grant_type': 'authorization_code',
             'redirect_uri': 'http://www.other.com/token',
+            'client_id': client_id,
             'code': authorization_code,
         }
 
@@ -397,6 +430,7 @@ class OAuthTestCase(WSGITestCase):
             'client_id': client_id,
             'redirect_uri': 'http://www.other.com/token',
             'state': 'xyz',
+            'scope': 'me, other',
         }
         resp = self.request(
             '/authorize', data=token_request_mock_data,
@@ -500,6 +534,7 @@ class OAuthTestCase(WSGITestCase):
             'grant_type': 'password',
             'username': credentials['username'],
             'password': credentials['password'],
+            'scope': 'me'
         }
 
         resp = self.request(
