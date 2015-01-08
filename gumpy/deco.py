@@ -8,18 +8,22 @@ from .framework import (
     EventSlot, Activator, Deactivator, ServiceUnavaliableError)
 
 def require(*service_names, **service_dict):
+    def _get_service(ctx, name):
+        while True:
+            try:
+                return ctx.get_service(name)
+            except ServiceUnavaliableError:
+                ctx.__executor__.step()
+
     def deco(func):
         def injected_func(self, *args, **kwds):
             _args = list(args)
             _kwds = kwds.copy()
             for sn in service_names:
-                try:
-                    _args.append(self.__context__.get_service(sn))
-                except ServiceUnavaliableError:
-                    _args.append(None)
+                _args.append(_get_service(self.__context__, sn))
             for k, v in service_dict.items():
                 try:
-                    _kwds[k] = self.__context__.get_service(v)
+                    _kwds[k] = _get_service(self.__context__, v)
                 except ServiceUnavaliableError:
                     _kwds[k] = None
             return func(self, *_args, **_kwds)
