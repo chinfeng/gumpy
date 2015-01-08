@@ -775,12 +775,10 @@ class Framework(object):
                         work_list.append(c.__reference__)
 
     def _digest_from_consumer(self, consumer):
-        work_list = list(self.producers())
-        while work_list:
-            p = work_list.pop(0)
+        for p in self.producers():
             if p.is_satisfied:
                 if consumer.bind(p) and consumer.__reference__.provides:
-                    work_list.append(consumer.__reference__)
+                    self._digest_from_producer(consumer.__reference__)
 
     @property
     def repo_path(self):
