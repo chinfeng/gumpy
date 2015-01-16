@@ -166,7 +166,6 @@ class OAuthTestCase(WSGITestCase):
             '/signup', headers={'Content-Type': 'application/json'}, data=credentials
         )
         self.assertEqual(200, resp.code)
-        self.assertIn('account_id', resp.dct)
 
         # 1. 客户代理 -> GET /authorize 发起请求 (A)
         #   测试是否能正常中转至登陆页面 /signin.html
@@ -328,6 +327,8 @@ class OAuthTestCase(WSGITestCase):
         self.assertEqual(credentials['username'], resp.dct['username'])
         self.assertEqual(credentials['other'], resp.dct['other'])
 
+        self.reset()
+
         # 使用错误的 access_token，返回 401
         resp = self.request(
             '/me', headers={'Authorization': 'Bearer ' + uuid.uuid4().hex}
@@ -421,7 +422,6 @@ class OAuthTestCase(WSGITestCase):
             '/signup', headers={'Content-Type': 'application/json'}, data=credentials
         )
         self.assertEqual(200, resp.code)
-        self.assertIn('account_id', resp.dct)
 
         # 1. 客户代理 -> GET /authorize 发起请求 (A)
         #   测试是否能正常中转至登陆页面 /signin.html
@@ -528,7 +528,6 @@ class OAuthTestCase(WSGITestCase):
             '/signup', headers={'Content-Type': 'application/json'}, data=credentials
         )
         self.assertEqual(200, resp.code)
-        self.assertIn('account_id', resp.dct)
 
         password_grant_mock_data = {
             'grant_type': 'password',

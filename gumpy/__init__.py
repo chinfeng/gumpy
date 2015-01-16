@@ -14,3 +14,7 @@ from .framework import (
 from .configuration import (
     LocalConfiguration
 )
+
+from .executor import (
+    Executor,
+)

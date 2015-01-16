@@ -16,17 +16,17 @@ def require(*service_names, **service_dict):
                 ctx.__executor__.step()
 
     def deco(func):
-        def injected_func(self, *args, **kwds):
+        def injected_func(self, *args, **kwargs):
             _args = list(args)
-            _kwds = kwds.copy()
+            _kwargs = kwargs.copy()
             for sn in service_names:
                 _args.append(_get_service(self.__context__, sn))
             for k, v in service_dict.items():
                 try:
-                    _kwds[k] = _get_service(self.__context__, v)
+                    _kwargs[k] = _get_service(self.__context__, v)
                 except ServiceUnavaliableError:
-                    _kwds[k] = None
-            return func(self, *_args, **_kwds)
+                    _kwargs[k] = None
+            return func(self, *_args, **_kwargs)
         return injected_func
     return deco
 
@@ -65,8 +65,8 @@ event = _EventHepler
 
 def configuration(**config_map):
     def deco(func):
-        def configuration_injected_func(self, *args, **kwds):
-            _kwds = kwds.copy()
+        def configuration_injected_func(self, *args, **kwargs):
+            _kwargs = kwargs.copy()
             config = self.__reference__.__context__.configuration
             for p, c in config_map.items():
                 try:
@@ -76,10 +76,10 @@ def configuration(**config_map):
                         ck, default = c[0], c[1] if len(c) > 1 else None
                     else:
                         break
-                    _kwds[p] = config.get(ck, default)
+                    _kwargs[p] = config.get(ck, default)
                 except KeyError:
                     pass
-            return func(self, *args, **_kwds)
+            return func(self, *args, **_kwargs)
         return configuration_injected_func
     return deco
 

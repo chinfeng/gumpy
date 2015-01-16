@@ -59,6 +59,18 @@ class BaseHandler(tornado.web.RequestHandler):
             self._current_user = json_decode(account_raw) if account_raw else None
         return self._current_user
 
+    def get_access_token(self):
+        access_token = self.get_secure_cookie('access_token', None)
+        if not access_token:
+            bearer_str = self.request.headers.get('Authorization', None)
+            if bearer_str:
+                if bearer_str.startswith('Bearer '):
+                    return bearer_str[7:]
+
+            return self.get_argument('access_token', None)
+        else:
+            return access_token.decode('utf-8')
+
 class RedirectBaseHandler(BaseHandler):
     def send_redirect(self, redirect_uri, args):
         self.clear()
@@ -98,8 +110,12 @@ class SignUpHandler(BaseHandler):
     __route__ = r'/signup'
     def post(self):
         data = json.loads(self.request.body.decode('utf-8'))
-        account_id = self._auth_server.register_account(data)
-        self.write(dict(account_id=account_id))
+        self._auth_server.register_account(data)
+        token_data = self._auth_provider.password_grant(data['username'], data, 'me, all')
+        logger.debug('access_token: {0}'.format(token_data['access_token']))
+        self.set_secure_cookie('access_token', token_data['access_token'])
+        self.set_secure_cookie('refresh_token', token_data['refresh_token'])
+        self.write(token_data)
 
 class RevokeTokenHandler(BaseHandler):
     """ TODO: demonstration without any permission check for now """
@@ -142,19 +158,10 @@ class ClientListHandler(BaseHandler):
 
 class AccountInfoHandler(BaseHandler):
     __route__ = r'/me'
-    def _get_access_token(self):
-        bearer_str = self.request.headers.get('Authorization', None)
-        if bearer_str:
-            if bearer_str.startswith('Bearer '):
-                return bearer_str[7:]
-
-        access_token = self.get_argument('access_token', None)
-        access_token = access_token or self.get_secure_cookie('access_token', None)
-        return access_token
-
     def get(self):
-        token = self._get_access_token()
-        if self._auth_server.verify_scope(token, 'me'):
+        token = self.get_access_token()
+        logger.debug('get_access_token: {0}'.format(token))
+        if token and self._auth_server.verify_scope(token, 'me'):
             account = self._auth_server.get_account_by_token(token)
 
             if account:
@@ -172,7 +179,7 @@ class AccountInfoHandler(BaseHandler):
                     'example', 'access_denied',
                 )
             )
-            self.send_error(401)
+            self.set_status(401, 'Unauthorized')
 
 class SignInHandler(BaseHandler):
     __route__ = r'/signin'

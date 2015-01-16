@@ -29,7 +29,7 @@ def main():
     fmk = Framework(LocalConfiguration(conf_pt), pt)
     cmd = GumCmd(fmk, pt)
     if autostep:
-        t = threading.Thread(target=fmk.__executor__.loop)
+        t = threading.Thread(target=fmk.__executor__.loop, args=(True, ))
         t.setDaemon(True)
         t.start()
     try:

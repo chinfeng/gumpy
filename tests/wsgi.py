@@ -46,8 +46,6 @@ class WSGITestCase(unittest.TestCase):
         self._serve_thread.setDaemon(True)
         self._opener = build_opener(NoRedirectionProcessor, HTTPCookieProcessor(self._cookie_jar))
 
-        self._cookies = {}
-
     def setUp(self):
         self._serve_thread.start()
 
@@ -57,6 +55,10 @@ class WSGITestCase(unittest.TestCase):
 
     def get_app(self):
         raise NotImplementedError
+
+    def reset(self):
+        self._cookie_jar = CookieJar()
+        self._opener = build_opener(NoRedirectionProcessor, HTTPCookieProcessor(self._cookie_jar))
 
     def request(self, url, method=None, data=None, headers=None):
         headers = headers or {}

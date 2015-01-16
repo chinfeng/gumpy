@@ -15,7 +15,7 @@ class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
         wsgiref.simple_server.WSGIServer.__init__(self, *args, **kwds)
         self._executor = executor
 
-    def process_request_thread(self, request, client_address):
+    def process_request_coroutine(self, request, client_address):
         try:
             self.finish_request(request, client_address)
             self.shutdown_request(request)
@@ -24,14 +24,7 @@ class TaskPoolWSGIServer(wsgiref.simple_server.WSGIServer):
             self.shutdown_request(request)
 
     def process_request(self, request, client_address):
-        self._executor.submit(self.process_request_thread, request, client_address)
-
-    def serve_forever(self, *args):
-        t = threading.Thread(
-            target=wsgiref.simple_server.WSGIServer.serve_forever, args=(self, )
-        )
-        t.setDaemon(True)
-        t.start()
+        self._executor.call(functools.partial(self.process_request_coroutine, request, client_address))
 
 @service
 class WSGIService(object):
@@ -48,7 +41,10 @@ class WSGIService(object):
             self._server = wsgiref.simple_server.make_server(
                 '', port, self._wsgi_app, server_class=sc
             )
-            self._server.serve_forever()
+
+            t = threading.Thread(target=self._server.serve_forever)
+            t.setDaemon(True)
+            t.start()
         except BaseException as err:
             err.args = ('tserv start fails.', ) + err.args
             logger.exception(err)

@@ -3,6 +3,7 @@ __author__ = 'chinfeng'
 
 import zipfile
 import os
+import functools
 import zipimport
 import threading
 import collections
@@ -33,206 +34,18 @@ except ImportError:
     load_source = lambda fullname, path: SourceFileLoader(fullname, path).load_module()
 from importlib import import_module
 from .configuration import LocalConfiguration
+from .executor import Executor
 from inspect import isgeneratorfunction
 import types
 
 import logging
 logger = logging.getLogger(__name__)
 
-class _BaseFuture(object):
-    def __init__(self, executor):
-        self._executor = executor
-        self._done = False
-        self._exception = None
-        self._done_callbacks = []
-    def result(self):
-        raise NotImplementedError
-    def exception(self):
-        return self._exception
-    def wait(self):
-        if not self.is_done():
-            if self._executor.in_loop():
-                while not self.is_done():
-                    self._executor.step()
-            else:
-                evt = threading.Event()
-                evt.clear()
-                step_hook = lambda e=evt, f=self: e.set() if f.is_done() else None
-                self._executor.add_step_hook(step_hook)
-                evt.wait()
-                self._executor.remove_step_hook(step_hook)
-    def is_done(self):
-        return self._done
-    def add_done_callback(self, fn, *args, **kwds):
-        raise NotImplementedError
-    def set_exception(self, exception):
-        self._done = True
-        self._exception = exception
-
-class _GeneralFuture(_BaseFuture):
-    def __init__(self, executor):
-        super(self.__class__, self).__init__(executor)
-        self._result = None
-    def result(self):
-        self.wait()
-        if self._exception:
-            raise self._exception
-        else:
-            return self._result
-    def send_result(self, result):
-        if not self._done:
-            self._result = result
-            self._done = True
-            for fn, args, kwds in self._done_callbacks:
-                self._executor.submit(fn, result, *args, **kwds)
-    def add_done_callback(self, fn, *args, **kwds):
-        if self.is_done():
-            self._executor.submit(fn, self._result, *args, **kwds)
-        else:
-            self._done_callbacks.append((fn, args, kwds))
-
-class _GeneratorFuture(_BaseFuture):
-    def __init__(self, executor):
-        super(self.__class__, self).__init__(executor)
-        self._result_list = []
-        self._incoming_result = Queue()
-    def result(self):
-        for rt in self._result_list:
-            yield rt
-        while not self.is_done():
-            if self._executor.in_loop():
-                while self._incoming_result.empty():
-                    self._executor.step()
-                yield self._incoming_result.get()
-            else:
-                yield self._incoming_result.get()
-    def send_result(self, result):
-        if not self._done:
-            if type(result) is StopIteration or result is StopIteration:
-                self._done = True
-                for fn, args, kwds in self._done_callbacks:
-                    self._executor.submit(fn, self._result_list, *args, **kwds)
-            else:
-                self._result_list.append(result)
-                self._incoming_result.put(result)
-        else:
-            raise RuntimeError('cannot send result after done.')
-    def __iter__(self):
-        return self.result()
-    def add_done_callback(self, fn, *args, **kwds):
-        if self.is_done():
-            self._executor.submit(fn, self._result_list, *args, **kwds)
-        else:
-            self._done_callbacks.append((fn, args, kwds))
-
-class _TaskFuture(_BaseFuture):
-    def __init__(self, executor):
-        super(self.__class__, self).__init__(executor)
-        self._last_result = None
-        self._incoming_result = Queue()
-    def result(self):
-        while not self.is_done():
-            if self._executor.in_loop():
-                while self._incoming_result.empty():
-                    self._executor.step()
-                yield self._incoming_result.get()
-            else:
-                yield self._incoming_result.get()
-    def wait(self):
-        self.result()
-    def send_result(self, result):
-        if not self._done:
-            if type(result) is StopIteration or result is StopIteration:
-                self._done = True
-                for fn, args, kwds in self._done_callbacks:
-                    self._executor.submit(fn, self._last_result, *args, **kwds)
-            else:
-                self._last_result = result
-                self._incoming_result.put(result)
-        else:
-            raise RuntimeError('cannot send result after done.')
-    def __iter__(self):
-        while True:
-            yield self.result()
-    def add_done_callback(self, fn, *args, **kwds):
-        if self.is_done():
-            self._executor.submit(fn, self._last_result, *args, **kwds)
-        else:
-            self._done_callbacks.append((fn, args, kwds))
-
-class _Executor(object):
-    def __init__(self):
-        self._tasks = collections.deque()
-        self._incoming_evt = threading.Event()
-        self._thread_ident = None
-        self._step_hooks = []
-    def _generator_wrapper(self, fn, args, kwds):
-        yield fn(*args, **kwds)
-    @property
-    def thread_ident(self):
-        if not self._thread_ident:
-            self._thread_ident = threading.current_thread().ident
-        return self._thread_ident
-    def in_loop(self):
-        return threading.current_thread().ident == self.thread_ident
-    def add_step_hook(self, fn):
-        self._step_hooks.append(fn)
-    def remove_step_hook(self, fn):
-        self._step_hooks.remove(fn)
-    def _append_task(self, gen, future, exclusive):
-        self._tasks.append((gen, future, exclusive))
-        self._incoming_evt.set()
-        return future
-    def _submit(self, fn, exclusive, args, kwds):
-        if isinstance(fn, Task):
-            return self._append_task(fn(*args, **kwds), _TaskFuture(self), False)
-        elif isgeneratorfunction(fn):
-            return self._append_task(fn(*args, **kwds), _GeneratorFuture(self), exclusive)
-        else:
-            return self._append_task(self._generator_wrapper(fn, args, kwds), _GeneralFuture(self), exclusive)
-    def submit(self, fn, *args, **kwds):
-        return self._submit(fn, False, args, kwds)
-    def exclusive_submit(self, fn, *args, **kwds):
-        return self._submit(fn, True, args, kwds)
-    def step(self):
-        if not self.in_loop():
-            logger.warning('Calling executor.step from other thread.')
-            return False
-        try:
-            gen, f, exclusive = self._tasks.popleft()
-        except IndexError:
-            self._incoming_evt.clear()
-            return False
-        try:
-            f.send_result(next(gen))
-            if exclusive:
-                self._tasks.appendleft((gen, f, exclusive))
-            else:
-                self._tasks.append((gen, f, exclusive))
-        except StopIteration:
-            f.send_result(StopIteration)
-        except BaseException as err:
-            f.set_exception(err)
-        for fn in self._step_hooks:
-            fn()
-        return True
-    def join(self):
-        while self.step():
-            pass
-    def is_idle(self):
-        return not bool(self._tasks)
-    def wait_until_active(self):
-        self._incoming_evt.wait()
-    def loop(self):
-        while True:
-            self.wait_until_active()
-            self.step()
-
 def async(func):
-    def _async_callable(instance, *args, **kwds):
+    def _async_callable(instance, *args, **kwargs):
         if hasattr(instance, '__executor__'):
             method = types.MethodType(func, instance)
-            return instance.__executor__.submit(method, *args, **kwds)
+            return instance.__executor__.call(functools.partial(method, *args, **kwargs))
         else:
             return func
     return _async_callable
@@ -303,8 +116,8 @@ class Annotation(object):
             self._nested = None
         self._nesting = None
         self._metadata = metadata
-    def __call__(self, *args, **kwds):
-        return self._subject(*args, **kwds)
+    def __call__(self, *args, **kwargs):
+        return self._subject(*args, **kwargs)
     @property
     def nesting(self):
         return self._nesting
@@ -366,8 +179,8 @@ class _Callable(object):
             self._func = func
         else:
             raise RuntimeError('need a callable object')
-    def __call__(self, *args, **kwds):
-        self._func(*args, **kwds)
+    def __call__(self, *args, **kwargs):
+        self._func(*args, **kwargs)
 
 class Activator(_Callable):
     def __init__(self, func):
@@ -381,21 +194,21 @@ class Task(object):
     def __init__(self, fn, instance):
         self._fn = fn
         self._instance = instance
-    def __call__(self, *args, **kwds):
+    def __call__(self, *args, **kwargs):
         method = types.MethodType(self._fn, self._instance)
         if isgeneratorfunction(method):
-            for n in method(*args, **kwds):
+            for n in method(*args, **kwargs):
                 yield n
         else:
-            yield method(*args, **kwds)
-    def spawn(self, *args, **kwds):
+            yield method(*args, **kwargs)
+    def spawn(self, *args, **kwargs):
         method = types.MethodType(self._fn, self._instance)
         if hasattr(self._instance, '__executor__'):
             extr = self._instance.__executor__
         else:
-            extr = kwds.pop('__executor__', None)
+            extr = kwargs.pop('__executor__', None)
         if extr:
-            extr.submit(method, *args, **kwds)
+            extr.call(functools.partial(method, *args, **kwargs))
         else:
             raise RuntimeError('no executor specify for {0}'.format(self._fn.__name__))
 
@@ -454,8 +267,8 @@ class EventSlot(object):
         self._instance = instance
         self._func = func
 
-    def call(self, *args, **kwds):
-        return self._func(self._instance, *args, **kwds)
+    def call(self, *args, **kwargs):
+        return self._func(self._instance, *args, **kwargs)
 
     @property
     def name(self):
@@ -465,9 +278,9 @@ class _EventProxy(object):
     def __init__(self, events=None):
         self._events = events or set()
 
-    def send(self, *args, **kwds):
+    def send(self, *args, **kwargs):
         for e in self._events:
-            e.call(*args, **kwds)
+            e.call(*args, **kwargs)
 
 class _EventManager(object):
     def __init__(self, owner):
@@ -546,17 +359,17 @@ class ServiceReference(object):
                 instance.__reference__ = self
                 instance.__init__()
             elif isinstance(self._cls, types.FunctionType):
-                kwds = {}
+                kwargs = {}
                 varnames = self._cls.__code__.co_varnames
                 if '__context__' in varnames:
-                    kwds['__context__'] = self.__context__
+                    kwargs['__context__'] = self.__context__
                 if '__framework__' in varnames:
-                    kwds['__framework__'] = self.__framework__
+                    kwargs['__framework__'] = self.__framework__
                 if '__executor__' in varnames:
-                    kwds['__executor__'] = self.__executor__
+                    kwargs['__executor__'] = self.__executor__
                 if '__reference__' in varnames:
-                    kwds['__reference__'] = self
-                instance = self._cls(**kwds)
+                    kwargs['__reference__'] = self
+                instance = self._cls(**kwargs)
             instance_dir = _subtract_dir(instance, object)
             if 'on_start' in instance_dir:
                 instance.on_start()
@@ -741,7 +554,7 @@ class BundleContext(object):
 
 class Framework(object):
     def __init__(self, configuration=None, repo_path=None):
-        self.__executor__ = _Executor()
+        self.__executor__ = Executor()
         self._repo_path = repo_path
         self._bundles = {}
         self._lock = threading.Lock()
@@ -887,13 +700,17 @@ class Framework(object):
         for uri, start in self._state_conf.items():
             try:
                 if uri not in uri_dict:
-                    bdl = self.install_bundle(uri).result()
+                    def _start_later(f, b):
+                        if f:
+                            b.start()
+                    f = self.install_bundle(uri)
+                    f.add_consumer(functools.partial(_start_later, start))
                 else:
                     bdl = uri_dict[uri]
-                if start:
-                    bdl.start().wait()
+                    if start:
+                        bdl.start()
             except BaseException as err:
-                err.args = ('bundle {0} init error:'.format(uri), ) + err.args
+                logger.warning('bundle {0} init error:'.format(uri))
                 logger.exception(err)
                 invalid_uris.add(uri)
         for uri in invalid_uris:
@@ -904,8 +721,8 @@ class Framework(object):
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
         self.configuration.close()
 
-    def call(self, fn, *args, **kwds):
-        self.__executor__.submit(fn, *args, **kwds)
+    def call(self, fn, *args, **kwargs):
+        self.__executor__.call(functools.partial(fn, *args, **kwargs))
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None

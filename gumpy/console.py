@@ -51,7 +51,7 @@ class GumCmd(Cmd):
         try:
             f = self._framework.install_bundle(uri)
             if not async:
-                f.result()
+                f.wait()
         except:
             print(traceback.format_exc())
 
@@ -73,7 +73,7 @@ class GumCmd(Cmd):
                 bdl = self._framework.bundles[bn]
                 f = bdl.start()
                 if not async:
-                    f.result()
+                    f.wait()
             except:
                 print(traceback.format_exc())
         else:
@@ -92,7 +92,7 @@ class GumCmd(Cmd):
                 bdl = self._framework.bundles[bn]
                 f = bdl.stop()
                 if not async:
-                    f.result()
+                    f.wait()
             except:
                 print(traceback.format_exc())
         else:

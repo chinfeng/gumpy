@@ -31,11 +31,11 @@ class CloseableQueue(Queue):
     def __init__(self, *args, **kwargs):
         Queue.__init__(self, *args, **kwargs)
         self._close_event = Event()
-        self._close_event.set()
+        self._close_event.clear()
 
     def close(self):
         self.put(_EndOfQueue())
-        self._close_event.clear()
+        self._close_event.set()
 
     def get(self, block=True, timeout=None):
         r = Queue.get(self, block, timeout)
@@ -55,13 +55,15 @@ class Future(object):
         self._executor = executor
         self._exc = None
         self._done = False
+        self._lock = Lock()
         self._consumers = []
         self._error_callbacks = []
         self._result_cache = []
 
     def set_done(self):
         for c in self._consumers:
-            c.close()
+            if isinstance(c, GeneratorType):
+                c.close()
         self._done = True
 
     def consume_result(self, result):
@@ -79,6 +81,7 @@ class Future(object):
         self._exc = exc
         for cb in self._error_callbacks:
             cb(exc)
+        self.set_done()
 
     def add_consumer(self, callback):
         if _is_gen(callback):
@@ -111,31 +114,33 @@ class Future(object):
         self.add_consumer(partial(_put_to_sync_queue, queue))
         return queue
 
+    def wait(self):
+        self.result_queue().wait()
+        if self._exc:
+            raise self._exc
+
 
 class Executor(object):
     def __init__(self):
         self._task_deque = deque()
         self._lock = Lock()
         self._thread_ident = None
+        self._closed = False
 
     def _step(self):
         try:
             future, gen = self._task_deque.popleft()
             future.consume_result(next(gen))
             self._task_deque.append((future, gen))
-            return future
+            return True
         except StopIteration:
             future.set_done()
-            return future
+            return True
         except IndexError:
-            return None
+            return False
         except BaseException as err:
             future.set_exception(err)
-            return future
-
-    def _step_iter(self):
-        while True:
-            yield self._step()
+            return True
 
     def loop(self, forever=False):
         with self._lock:
@@ -144,10 +149,13 @@ class Executor(object):
             if self._thread_ident != current_thread().ident:
                 # ensure same thread for loop
                 raise ThreadError('Executor.loop for one thread only.')
-        while forever or self._step():
+        while (self._step() or forever) and (not self._closed):
             pass
 
         self._thread_ident = None
+
+    def close(self):
+        self._closed = True
 
     def call(self, fn):
         return self.call_posterior(fn)
