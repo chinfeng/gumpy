@@ -2,33 +2,39 @@
 __author__ = 'chinfeng'
 
 class BucketBase(object):
-    def delete(self):
+    def drop(self):
         raise NotImplementedError
 
-    def put_object(self, key, content):
+    def put(self, entity):
         raise NotImplementedError
 
-    def get_object(self, key):
+    def get(self, stub):
         raise NotImplementedError
 
-    def delete_object(self, key):
+    def delete(self, stub):
+        raise NotImplementedError
+
+    def update(self, entity):
         raise NotImplementedError
 
     def __contains__(self, item):
         raise NotImplementedError
 
     def __getitem__(self, item):
-        raise NotImplementedError
+        return self.get(item)
 
 class StorageBase(object):
+    def create_bucket(self, name, index=()):
+        raise NotImplementedError
+
     def get_bucket(self, name):
         raise NotImplementedError
 
-    def delete(self, bucket):
+    def drop(self, bucket):
         raise NotImplementedError
 
     def __contains__(self, item):
         raise NotImplementedError
 
     def __getitem__(self, item):
-        raise NotImplementedError
+        return self.get_bucket(item)
