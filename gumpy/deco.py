@@ -13,7 +13,10 @@ def require(*service_names, **service_dict):
             try:
                 return ctx.get_service(name)
             except ServiceUnavaliableError:
-                ctx.__executor__.step()
+                # TODO
+                # 此处需要交还控制权给 ctx.__executor__
+                # 或许还有其他办法处理？
+                pass
 
     def deco(func):
         def injected_func(self, *args, **kwargs):

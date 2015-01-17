@@ -223,11 +223,11 @@ class Consumer(object):
     def bind(self, resource_reference):
         try:
             if all((
-                   (self.match(resource_reference)),
-                   (self._instance is not resource_reference),
-                   (not self.is_filled()),
-                   (resource_reference not in self._consumed_resources)
-               )):
+                (self.match(resource_reference)),
+                (self._instance is not resource_reference),
+                (not self.is_filled()),
+                (resource_reference not in self._consumed_resources)
+            )):
                 self._consumed_resources.add(resource_reference)
                 self._bind_fn(self._instance, resource_reference.get_service())
                 return True
