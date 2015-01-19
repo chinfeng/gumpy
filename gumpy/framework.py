@@ -4,6 +4,7 @@ __author__ = 'chinfeng'
 import zipfile
 import os
 import functools
+import itertools
 import zipimport
 import threading
 import collections
@@ -294,6 +295,32 @@ class _EventManager(object):
     def __getitem__(self, item):
         return self.__getattr__(item)
 
+class Requirement(object):
+    def __init__(self, instance, fn, service_names, service_dict):
+        self._instance = instance
+        self._fn = fn
+        self._service_names = service_names
+        self._service_dict = service_dict
+
+    def __call__(self, *args, **kwargs):
+        ctx = self._instance.__context__
+        _args = list(args)
+        _kwargs = kwargs.copy()
+        for sn in self._service_names:
+            _args.append(ctx.get_service(sn))
+        for k, v in self._service_dict.items():
+            try:
+                _kwargs[k] = ctx.get_service(v)
+            except ServiceUnavaliableError:
+                _kwargs[k] = None
+        return self._fn(self._instance, *_args, **_kwargs)
+
+    def check_satisfied(self, ctx):
+        return all(itertools.chain(
+            (ctx.get_service_reference(sn).is_avaliable for sn in self._service_names),
+            (ctx.get_service_reference(sn).is_avaliable for sn in self._service_dict.values()),
+        ))
+
 class ServiceReference(object):
     def __init__(self, bundle, cls, name=None, provides=None):
         self.__context__ = bundle
@@ -404,6 +431,17 @@ class ServiceReference(object):
         else:
             raise ServiceUnavaliableError('{0}:{1}'.format(self.__context__.name, self._name))
 
+    def check_requirement(self):
+        instance_dir = dir(self._cls)
+        requirements = filter(
+            lambda r: r is not None and isinstance(r, Requirement),
+            (getattr(self._cls, an) for an in instance_dir)
+        )
+        return all(
+            filter(lambda r: r.check_satisfied(self.__context__), requirements)
+        )
+
+
 class BundleContext(object):
     ST_INSTALLED = _immutable_prop((0, 'INSTALLED'))
     ST_RESOLVED = _immutable_prop((1, 'RESOLVED'))
@@ -505,11 +543,21 @@ class BundleContext(object):
     @async
     def start(self):
         if self._state == self.ST_RESOLVED:
-            self._state = self.ST_STARTING
-            self._activator()
-            for sr in self._service_references.values():
-                sr.start()
-            self._state = self.ST_ACTIVE
+            try:
+                self._state = self.ST_STARTING
+                self._activator()
+                sr_list = collections.deque(self._service_references.values())
+                while sr_list:
+                    sr = sr_list.popleft()
+                    if sr.check_requirement():
+                        sr.start()
+                    else:
+                        sr_list.append(sr)
+                    yield
+                self._state = self.ST_ACTIVE
+            except:
+                self._state = self.ST_RESOLVED
+                raise
         elif self._state == self.ST_STARTING:
             pass
         else:

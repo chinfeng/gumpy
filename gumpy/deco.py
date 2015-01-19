@@ -5,33 +5,18 @@ import functools
 
 from .framework import (
     Consumer, Annotation, ServiceAnnotation, Task,
-    EventSlot, Activator, Deactivator, ServiceUnavaliableError)
+    EventSlot, Activator, Deactivator, Requirement)
 
-def require(*service_names, **service_dict):
-    def _get_service(ctx, name):
-        while True:
-            try:
-                return ctx.get_service(name)
-            except ServiceUnavaliableError:
-                # TODO
-                # 此处需要交还控制权给 ctx.__executor__
-                # 或许还有其他办法处理？
-                pass
+class _RequirementHepler(object):
+    def __init__(self, fn, args, kwargs):
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+        self._requirements = {}
+    def __get__(self, instance, owner):
+        return Requirement(instance or owner, self._fn, self._args, self._kwargs)
 
-    def deco(func):
-        def injected_func(self, *args, **kwargs):
-            _args = list(args)
-            _kwargs = kwargs.copy()
-            for sn in service_names:
-                _args.append(_get_service(self.__context__, sn))
-            for k, v in service_dict.items():
-                try:
-                    _kwargs[k] = _get_service(self.__context__, v)
-                except ServiceUnavaliableError:
-                    _kwargs[k] = None
-            return func(self, *_args, **_kwargs)
-        return injected_func
-    return deco
+require = lambda *args, **kwargs: functools.partial(_RequirementHepler, args=args, kwargs=kwargs)
 
 class _ConsumerHelper(object):
     def __init__(self, fn, resource_uri, cardinality):
@@ -48,7 +33,7 @@ class _ConsumerHelper(object):
                 self._consumers[_id] = Consumer(instance, self._fn, self._unbind_fn, self._resource_uri, self._cardinality)
             return self._consumers[_id]
         else:
-            raise TypeError('Service instance is needed for a binder')
+            return self._fn
     def unbind(self, fn):
         self._unbind_fn = fn
         return self
@@ -56,13 +41,13 @@ class _ConsumerHelper(object):
 bind = lambda resource, cardinality='1..n': functools.partial(_ConsumerHelper, resource_uri=resource, cardinality=cardinality)
 
 class _EventHepler(object):
-    def __init__(self, func):
-        self._func = func
+    def __init__(self, fn):
+        self._fn = fn
     def __get__(self, instance, owner):
         if instance:
-            return EventSlot(instance, self._func)
+            return EventSlot(instance, self._fn)
         else:
-            raise TypeError('Service instance needed for event ')
+            return self._fn
 
 event = _EventHepler
 
@@ -106,6 +91,6 @@ class _TaskHelper(object):
         if instance:
             return Task(self._fn, instance)
         else:
-            raise TypeError('Service instance is needed for a task')
+            return self._fn
 
 task = _TaskHelper
