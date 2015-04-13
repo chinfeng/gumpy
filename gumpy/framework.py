@@ -8,31 +8,28 @@ import itertools
 import zipimport
 import threading
 import collections
+
 try:
     import ConfigParser as configparser
 except ImportError:
     import configparser
 try:
-    from Queue import Queue
-except ImportError:
     from queue import Queue
-try:
-    # 2.x
-    reload
-except NameError:
-    try:
-        # 3.3
-        from imp import reload
-    except ImportError:
-        # 3.4
-        from importlib import reload
-try:
-    # 2.x - 3.3
-    from imp import load_source
 except ImportError:
-    # 3.4
+    from Queue import Queue
+try:
+    try:
+        from importlib import reload
+    except ImportError:
+        from imp import reload
+except ImportError:
+    pass
+try:
     from importlib.machinery import SourceFileLoader
+
     load_source = lambda fullname, path: SourceFileLoader(fullname, path).load_module()
+except ImportError:
+    from imp import load_source
 from importlib import import_module
 from .configuration import LocalConfiguration
 from .executor import Executor
@@ -40,7 +37,9 @@ from inspect import isgeneratorfunction
 import types
 
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 def async(func):
     def _async_callable(instance, *args, **kwargs):
@@ -49,7 +48,9 @@ def async(func):
             return instance.__executor__.call(functools.partial(method, *args, **kwargs))
         else:
             return func
+
     return _async_callable
+
 
 _immutable_prop = lambda v: property(lambda self, value=v: value)
 _uri_class = collections.namedtuple('GumURI', ('host', 'port', 'bundle', 'service'))
@@ -57,10 +58,11 @@ _subtract_dir = lambda a, b: {an for an in dir(a) if an not in dir(b) and not an
 _BUNDLE_LEVEL = 0
 _SERVICE_LEVEL = 1
 
+
 def service_uri(uri, pwd_level=_SERVICE_LEVEL):
     if uri.startswith('gum://'):
         # absolute uri like:
-        #   gum://host:port/bundle:service
+        # gum://host:port/bundle:service
         location, entity = uri[6:].split('/')
         loc_list = location.split(':')
         host = loc_list.pop(0)
@@ -70,7 +72,7 @@ def service_uri(uri, pwd_level=_SERVICE_LEVEL):
         service = entity_list.pop(0) if entity_list else None
     else:
         # relative uri like:
-        #   service
+        # service
         #   bundle:service
         #   host/bundle:service
         u_list = uri.split('/')
@@ -94,17 +96,22 @@ def service_uri(uri, pwd_level=_SERVICE_LEVEL):
             bundle, service = entity_list
     return _uri_class(host, port, bundle, service)
 
+
 class BundleInstallError(RuntimeError):
     pass
+
 
 class BundleUnavailableError(RuntimeError):
     pass
 
+
 class BundleReloadError(RuntimeError):
     pass
 
+
 class ServiceUnavaliableError(RuntimeError):
     pass
+
 
 class Annotation(object):
     def __init__(self, subject, **metadata):
@@ -117,23 +124,29 @@ class Annotation(object):
             self._nested = None
         self._nesting = None
         self._metadata = metadata
+
     def __call__(self, *args, **kwargs):
         return self._subject(*args, **kwargs)
+
     @property
     def nesting(self):
         return self._nesting
+
     @property
     def nested(self):
         return self._nested
+
     @property
     def root_nesting(self):
         return self.nesting.root_nesting if self.nesting else self
+
     @property
     def subject(self):
         if self._nested:
             return self._nested.subject
         else:
             return self._subject
+
     @property
     def metadata(self):
         data_items = self._other_metadata_items()
@@ -156,6 +169,7 @@ class Annotation(object):
             for item in self._other_metadata_items(s._nested):
                 yield item
 
+
 class ServiceAnnotation(Annotation):
     def __init__(self, subject, name=None):
         super(self.__class__, self).__init__(subject, name=name)
@@ -165,11 +179,13 @@ class ServiceAnnotation(Annotation):
         metadata = self.root_nesting.metadata
         return ServiceReferenceFactory(self._subject, metadata.get('name'), metadata.get('provides', None))
 
+
 class ServiceReferenceFactory(object):
     def __init__(self, cls, name=None, provides=None):
         self._cls = cls
         self._name = name
         self._provides = provides
+
     def create(self, bundle):
         return ServiceReference(bundle, self._cls, self._name, self._provides)
 
@@ -180,21 +196,26 @@ class _Callable(object):
             self._func = func
         else:
             raise RuntimeError('need a callable object')
+
     def __call__(self, *args, **kwargs):
         self._func(*args, **kwargs)
+
 
 class Activator(_Callable):
     def __init__(self, func):
         super(self.__class__, self).__init__(func)
 
+
 class Deactivator(_Callable):
     def __init__(self, func):
         super(self.__class__, self).__init__(func)
+
 
 class Task(object):
     def __init__(self, fn, instance):
         self._fn = fn
         self._instance = instance
+
     def __call__(self, *args, **kwargs):
         method = types.MethodType(self._fn, self._instance)
         if isgeneratorfunction(method):
@@ -202,6 +223,7 @@ class Task(object):
                 yield n
         else:
             yield method(*args, **kwargs)
+
     def spawn(self, *args, **kwargs):
         method = types.MethodType(self._fn, self._instance)
         if hasattr(self._instance, '__executor__'):
@@ -213,6 +235,7 @@ class Task(object):
         else:
             raise RuntimeError('no executor specify for {0}'.format(self._fn.__name__))
 
+
 class Consumer(object):
     def __init__(self, instance, bind_fn, unbind_fn, resource_uri, cardinality):
         self._instance = instance
@@ -221,13 +244,14 @@ class Consumer(object):
         self._resource_uri = resource_uri
         self._optionality, self._multiplicity = cardinality.split('..')
         self._consumed_resources = set()
+
     def bind(self, resource_reference):
         try:
             if all((
-                (self.match(resource_reference)),
-                (self._instance is not resource_reference),
-                (not self.is_filled()),
-                (resource_reference not in self._consumed_resources)
+                    (self.match(resource_reference)),
+                    (self._instance is not resource_reference),
+                    (not self.is_filled()),
+                    (resource_reference not in self._consumed_resources)
             )):
                 self._consumed_resources.add(resource_reference)
                 self._bind_fn(self._instance, resource_reference.get_service())
@@ -237,6 +261,7 @@ class Consumer(object):
         except BaseException as err:
             logger.exception(err)
             return False
+
     def unbind(self, resource_reference):
         try:
             if resource_reference in self._consumed_resources:
@@ -248,19 +273,25 @@ class Consumer(object):
         except BaseException as err:
             logger.exception(err)
             return False
+
     def match(self, reference):
         return self.resource_uri in reference.provides
+
     @property
     def __reference__(self):
         return self._instance.__reference__
+
     @property
     def resource_uri(self):
         return self._resource_uri
+
     @property
     def is_satisfied(self):
         return len(self._consumed_resources) >= int(self._optionality)
+
     def is_filled(self):
         return bool(self._consumed_resources) and self._multiplicity == '1'
+
 
 class EventSlot(object):
     def __init__(self, instance, func):
@@ -275,6 +306,7 @@ class EventSlot(object):
     def name(self):
         return self._name
 
+
 class _EventProxy(object):
     def __init__(self, events=None):
         self._events = events or set()
@@ -282,6 +314,7 @@ class _EventProxy(object):
     def send(self, *args, **kwargs):
         for e in self._events:
             e.call(*args, **kwargs)
+
 
 class _EventManager(object):
     def __init__(self, owner):
@@ -294,6 +327,7 @@ class _EventManager(object):
 
     def __getitem__(self, item):
         return self.__getattr__(item)
+
 
 class Requirement(object):
     def __init__(self, instance, fn, service_names, service_dict):
@@ -320,6 +354,7 @@ class Requirement(object):
             (ctx.get_service_reference(sn).is_avaliable for sn in self._service_names),
             (ctx.get_service_reference(sn).is_avaliable for sn in self._service_dict.values()),
         ))
+
 
 class ServiceReference(object):
     def __init__(self, bundle, cls, name=None, provides=None):
@@ -397,6 +432,10 @@ class ServiceReference(object):
                 if '__reference__' in varnames:
                     kwargs['__reference__'] = self
                 instance = self._cls(**kwargs)
+                instance.__context__ = self.__context__
+                instance.__framework__ = self.__framework__
+                instance.__executor__ = self.__executor__
+                instance.__reference__ = self
             instance_dir = _subtract_dir(instance, object)
             if 'on_start' in instance_dir:
                 instance.on_start()
@@ -555,7 +594,8 @@ class BundleContext(object):
                         sr_list.append(sr)
                     yield
                 self._state = self.ST_ACTIVE
-            except:
+            except BaseException as err:
+                logger.exception(err)
                 self._state = self.ST_RESOLVED
                 raise
         elif self._state == self.ST_STARTING:
@@ -600,6 +640,7 @@ class BundleContext(object):
         else:
             return self.__framework__.bundles[u.bundle]
 
+
 class Framework(object):
     def __init__(self, configuration=None, repo_path=None):
         self.__executor__ = Executor()
@@ -638,8 +679,8 @@ class Framework(object):
     def _digest_from_consumer(self, consumer):
         for p in self.producers():
             if p.is_satisfied:
-                if consumer.bind(p) and consumer.__reference__.provides:
-                    self._digest_from_producer(consumer.__reference__)
+                consumer.bind(p)
+        self._digest_from_producer(consumer.__reference__)
 
     @property
     def repo_path(self):
@@ -751,6 +792,7 @@ class Framework(object):
                     def _start_later(f, b):
                         if f:
                             b.start()
+
                     f = self.install_bundle(uri)
                     f.add_consumer(functools.partial(_start_later, start))
                 else:
@@ -764,13 +806,22 @@ class Framework(object):
         for uri in invalid_uris:
             self._state_conf.pop(uri)
 
-    def close(self):
+    def stop(self):
+        for bdl in self.bundles.values():
+            bdl.stop()
+        self._save_status()
+
+    def terminate(self):
+        self._save_status()
+
+    def _save_status(self):
         for bdl in self.bundles.values():
             self._state_conf[bdl.uri] = (bdl.state == bdl.ST_ACTIVE)
         self.configuration.close()
 
     def call(self, fn, *args, **kwargs):
         self.__executor__.call(functools.partial(fn, *args, **kwargs))
+
 
 class DefaultFrameworkSingleton(object):
     _default_framework = None
@@ -779,5 +830,6 @@ class DefaultFrameworkSingleton(object):
         if not self._default_framework:
             self._default_framework = Framework()
         return self._default_framework
+
 
 default_framework = DefaultFrameworkSingleton()

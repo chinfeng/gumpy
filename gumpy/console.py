@@ -5,6 +5,7 @@ import os
 import traceback
 from cmd import Cmd
 
+
 class GumCmd(Cmd):
     def __init__(self, framework, plugins_path):
         Cmd.__init__(self)
@@ -56,9 +57,13 @@ class GumCmd(Cmd):
             print(traceback.format_exc())
 
     def do_list(self, line):
+        print(' ========================================================')
         for bdl in self._framework.bundles.values():
-            print('  {:<24}{:<24}'.format(
-                bdl.name, '[%s]' % bdl.state[1]))
+            print('  BUNDLE: {:<24}{:}'.format(bdl.name, '(STATUS: %s)' % bdl.state[1]))
+            print('  ------------------------------------------------------')
+            for sr in bdl.service_references.values():
+                print('    [ SERVICE: {:<24}{:} ]'.format(sr.name, 'satisfied' if sr.is_satisfied else 'unsatisfied'))
+            print(' ========================================================')
 
     def do_start(self, line):
         if line[-1] == '&':
@@ -121,7 +126,7 @@ class GumCmd(Cmd):
         try:
             evt, values = line.split(' ', 1)
             evt = self._framework.em[evt]
-            evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
+            evt.send(*(int(arg) if arg.isdigit() else arg for arg in values.split(' ')))
         except:
             print(traceback.format_exc())
 
@@ -129,7 +134,7 @@ class GumCmd(Cmd):
         try:
             bn, evt, values = line.split(' ', 2)
             evt = self._framework.bundles[bn].em[evt]
-            evt.send(*(int(arg) if arg.isdigit() else arg  for arg in values.split(' ')))
+            evt.send(*(int(arg) if arg.isdigit() else arg for arg in values.split(' ')))
         except:
             print(traceback.format_exc())
 

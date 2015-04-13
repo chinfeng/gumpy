@@ -8,8 +8,10 @@ from .console import GumCmd
 from .framework import Framework
 from .configuration import LocalConfiguration
 
+
 def main():
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path',
                         dest='plugins_path', default='plugins',
@@ -36,6 +38,7 @@ def main():
         cmd.cmdloop()
     finally:
         fmk.close()
+
 
 if __name__ == '__main__':
     main()

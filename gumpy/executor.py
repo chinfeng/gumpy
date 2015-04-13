@@ -6,10 +6,15 @@ from collections import deque
 from inspect import isgeneratorfunction
 from functools import partial
 from threading import current_thread, Lock, Event, ThreadError
+
 try:
-    from Queue import Queue, Empty
-except ImportError:
     from queue import Queue, Empty
+except ImportError:
+    from Queue import Queue, Empty
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 def _is_gen(fn):
     return isgeneratorfunction(fn) or (isinstance(fn, partial) and isgeneratorfunction(fn.func))
@@ -104,6 +109,7 @@ class Future(object):
 
     def result_queue(self):
         queue = CloseableQueue()
+
         def _put_to_sync_queue(q):
             try:
                 while True:
@@ -139,6 +145,7 @@ class Executor(object):
         except IndexError:
             return False
         except BaseException as err:
+            logger.exception(err)
             future.set_exception(err)
             return True
 
